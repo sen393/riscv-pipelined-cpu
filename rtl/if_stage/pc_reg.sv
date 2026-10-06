@@ -1,8 +1,9 @@
 module pc_reg
     import riscv_pkg::*;
 #(
-    parameter logic [XLEN-1:0] RESET_PC = '0,
-)(
+    parameter logic [XLEN-1:0] RESET_PC = '0
+)
+(
     input   logic               clk,
     input   logic               rst,
     input   logic               en,     // Active high en
@@ -21,3 +22,4 @@ module pc_reg
     end
 
 endmodule
+

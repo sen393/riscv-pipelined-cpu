@@ -1,4 +1,4 @@
-module if_id_reg;
+module if_id_reg
     import riscv_pkg::*;
 (
     input   logic               clk,
@@ -21,3 +21,4 @@ module if_id_reg;
     end
 
 endmodule
+

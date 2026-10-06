@@ -25,3 +25,4 @@ module reg_file
     assign rs2_data = ( rs2_addr == '0 ) ? '0 : x[rs2_addr];
 
 endmodule
+

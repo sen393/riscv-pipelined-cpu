@@ -9,9 +9,9 @@ module alu
 );
 
     always_comb begin
-        case (alu_op)
-            result = '0; // initialize result            
+        result = '0; // initialize result            
 
+        case (alu_op)
             ALU_ADD     : result = operand_a + operand_b;
             ALU_SUB     : result = operand_a - operand_b;
 
@@ -28,7 +28,10 @@ module alu
             ALU_OR      : result = operand_a | operand_b;
             ALU_XOR     : result = operand_a ^ operand_b;
             ALU_AND     : result = operand_a & operand_b;
+
+            default     : result = '0;
         endcase
     end
 
 endmodule
+

@@ -29,7 +29,7 @@ module if_stage
     // Next-PC logic
     // --------------------------------------------------------
 
-    assign pc_plus4 = pc + XLEN'd4;
+    assign pc_plus4 = pc + 'd4;
 
     assign next_pc  = (redirect_valid)
                     ? (redirect_pc)
@@ -77,3 +77,4 @@ module if_stage
 
 
 endmodule
+

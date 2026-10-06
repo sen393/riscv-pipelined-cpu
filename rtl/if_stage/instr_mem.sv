@@ -26,3 +26,4 @@ module instr_mem
     assign instr = mem[word_addr];
 
 endmodule
+
