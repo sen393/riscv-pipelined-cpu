@@ -139,6 +139,32 @@ package riscv_pkg;
 
 
     // ========================================================
+    // Decoded Instruction Control
+    // ========================================================
+
+    typedef struct packed {
+        logic         illegal;
+
+        logic         reg_write;
+        logic         mem_read;
+        logic         mem_write;
+
+        logic         uses_rs1;
+        logic         uses_rs2;
+
+        logic         load_unsigned;
+
+        alu_op_e      alu_op;
+        imm_sel_e     imm_sel;
+        op_a_sel_e    op_a_sel;
+        op_b_sel_e    op_b_sel;
+        wb_sel_e      wb_sel;
+        cf_op_e       cf_op;
+        mem_size_e    mem_size; 
+    } ctrl_t;
+
+
+    // ========================================================
     // Instruction Fetch/Decode Bundle
     // ========================================================
 
@@ -150,7 +176,6 @@ package riscv_pkg;
         logic [XLEN-1:0]    pc_plus4;
         instr_t             instr;
     } if_id_t;
-
 
 
     // ========================================================
@@ -179,35 +204,31 @@ package riscv_pkg;
     } id_ex_t;
 
 
-
     // ========================================================
-    // Decoded Instruction Control
+    // Execute/Memory Bundle
     // ========================================================
 
     typedef struct packed {
-        logic         illegal;
+        logic               valid;
 
-        logic         reg_write;
-        logic         mem_read;
-        logic         mem_write;
+        // Instruction info
+        addr_t              pc;
+        addr_t              pc_plus4;   // carry to wb stage
+        instr_t             instr;
 
-        logic         uses_rs1;
-        logic         uses_rs2;
+        // Register addresses
+        reg_addr_t          rd; // carry to wb stage for result
 
-        logic         load_unsigned;
+        // Operand values
+        word_t              alu_result;
+        word_t              store_data; // store rs2_data
 
-        alu_op_e      alu_op;
-        imm_sel_e     imm_sel;
-        op_a_sel_e    op_a_sel;
-        op_b_sel_e    op_b_sel;
-        wb_sel_e      wb_sel;
-        cf_op_e       cf_op;
-        mem_size_e    mem_size; 
-    } ctrl_t;
+        ctrl_t              ctrl;
+    } ex_mem_t;
 
 
     // ========================================================
-    // Decoded Instruction Control
+    // Formal Verification
     // ========================================================
 
     typedef struct packed {
