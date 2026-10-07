@@ -85,7 +85,12 @@ module id_stage
     );
 
 
+    // --------------------------------------------------------
+    // ID -> EX Bundle
+    // --------------------------------------------------------
+
     always_comb begin
+        // initialize
         id_ex_d             = '0;
 
         id_ex_d.valid       = if_id_q.valid;

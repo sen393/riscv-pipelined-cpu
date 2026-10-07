@@ -228,6 +228,29 @@ package riscv_pkg;
 
 
     // ========================================================
+    // Memory/Writeback Bundle
+    // ========================================================
+
+    typedef struct packed {
+        logic               valid;
+
+        // Instruction info
+        addr_t              pc;
+        addr_t              pc_plus4;   // carry to wb stage
+        instr_t             instr;
+
+        // Register addresses
+        reg_addr_t          rd; // carry to wb stage for result
+
+        // Operand values
+        word_t              alu_result;
+        word_t              mem_data;   // new, from data mem
+
+        ctrl_t              ctrl;
+    } mem_wb_t;
+
+
+    // ========================================================
     // Formal Verification
     // ========================================================
 
