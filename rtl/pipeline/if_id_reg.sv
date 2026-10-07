@@ -10,7 +10,7 @@ module if_id_reg
     output  if_id_t             q
 );
 
-    // Priority: rst, flush, en, hold (last)
+    // Priority: rst, flush, en/hold (last)
     always_ff @( posedge clk ) begin
         if (rst)
             q <= '0;
