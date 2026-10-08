@@ -4,13 +4,28 @@ module ex_stage
     // From ID/EX pipeline reg
     input   id_ex_t     id_ex_q,
 
+    // Forwarding control from hazard unit
+    input   fwd_sel_e   fwd_a_sel,
+    input   fwd_sel_e   fwd_b_sel,
+
+    // Forwarding data
+    input   word_t      ex_mem_fwd_data,
+    input   word_t      mem_wb_fwd_data,
+
     // To EX/MEM pipeline reg
     output  ex_mem_t    ex_mem_d,
 
     // Control-flow logic back to fetch
-   output   logic       redirect_valid, 
-   output   addr_t      redirect_pc
+    output   logic       redirect_valid, 
+    output   addr_t      redirect_pc
 );
+
+    // --------------------------------------------------------
+    // Forwarded signals
+    // --------------------------------------------------------
+
+    word_t          rs1_fwd;
+    word_t          rs2_fwd;
 
     // --------------------------------------------------------
     // ALU operands
@@ -21,6 +36,36 @@ module ex_stage
     word_t          alu_result;
 
 
+    // --------------------------------------------------------
+    // Input data forwarding selection
+    // --------------------------------------------------------
+
+    always_comb begin
+
+        // ----------------------------------------------------
+        // rs1 forwarding mux
+        // ----------------------------------------------------
+
+        case (fwd_a_sel)
+            FWD_EX_MEM  : rs1_fwd = ex_mem_fwd_data;
+            FWD_MEM_WB  : rs1_fwd = mem_wb_fwd_data;
+            FWD_NONE    : rs1_fwd = id_ex_q.rs1_data;
+            default     : rs1_fwd = id_ex_q.rs1_data;
+        endcase
+
+
+        // ----------------------------------------------------
+        // rs2 forwarding mux
+        // ----------------------------------------------------
+
+        case (fwd_b_sel)
+            FWD_EX_MEM  : rs2_fwd = ex_mem_fwd_data;
+            FWD_MEM_WB  : rs2_fwd = mem_wb_fwd_data;
+            FWD_NONE    : rs2_fwd = id_ex_q.rs2_data;
+            default     : rs2_fwd = id_ex_q.rs2_data;
+        endcase
+
+    end
     // --------------------------------------------------------
     // Branch unit outputs
     // --------------------------------------------------------
@@ -36,14 +81,14 @@ module ex_stage
     always_comb begin
 
         case (id_ex_q.ctrl.op_a_sel)
-            OP_A_RS1    : operand_a = id_ex_q.rs1_data;
+            OP_A_RS1    : operand_a = rs1_fwd;
             OP_A_PC     : operand_a = id_ex_q.pc;
             OP_A_ZERO   : operand_a = '0;
             default     : operand_a = '0;
         endcase
 
         case (id_ex_q.ctrl.op_b_sel)
-            OP_B_RS2    : operand_b = id_ex_q.rs2_data;
+            OP_B_RS2    : operand_b = rs2_fwd;
             OP_B_IMM    : operand_b = id_ex_q.imm;
             default     : operand_b = '0;
         endcase
@@ -72,8 +117,8 @@ module ex_stage
     branch_unit u_branch_unit
     (
         .pc             (id_ex_q.pc),
-        .rs1_data       (id_ex_q.rs1_data),
-        .rs2_data       (id_ex_q.rs2_data),
+        .rs1_data       (rs1_fwd),
+        .rs2_data       (rs2_fwd),
         .imm            (id_ex_q.imm),
         .cf_op          (id_ex_q.ctrl.cf_op),
 
@@ -107,7 +152,7 @@ module ex_stage
         ex_mem_d.rd         = id_ex_q.rd;
 
         ex_mem_d.alu_result = alu_result;
-        ex_mem_d.store_data = id_ex_q.rs2_data;
+        ex_mem_d.store_data = rs2_fwd;
 
         ex_mem_d.ctrl       = id_ex_q.ctrl;
     end

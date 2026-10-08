@@ -19,8 +19,6 @@ module riscv_core
     logic       id_ex_flush;
     logic       stall;
 
-    assign stall        = 1'b0; // PLACEHOLDER ****************
-
     assign if_id_flush  = redirect_valid;
     assign id_ex_flush  = redirect_valid | stall;
 
@@ -61,6 +59,26 @@ module riscv_core
     reg_addr_t  wb_rd_addr;
     word_t      wb_rd_wdata;
 
+
+    // --------------------------------------------------------
+    // Hazard/Forwarding signals
+    // --------------------------------------------------------
+
+    fwd_sel_e   fwd_a_sel;
+    fwd_sel_e   fwd_b_sel;
+
+    word_t      ex_mem_fwd_data;
+    word_t      mem_wb_fwd_data;
+
+    assign mem_wb_fwd_data = wb_rd_wdata;
+    always_comb begin
+        case (ex_mem_q.ctrl.wb_sel)
+            WB_ALU  : ex_mem_fwd_data = ex_mem_q.alu_result;
+        //  WB_MEM  : not forwardable from EX/MEM
+            WB_PC4  : ex_mem_fwd_data = ex_mem_q.pc_plus4;
+            default : ex_mem_fwd_data = '0;
+        endcase
+    end
 
     // --------------------------------------------------------
     // Instantiate IF
@@ -139,6 +157,12 @@ module riscv_core
     (
         .id_ex_q            (id_ex_q),
 
+        .fwd_a_sel          (fwd_a_sel),
+        .fwd_b_sel          (fwd_b_sel),
+
+        .ex_mem_fwd_data    (ex_mem_fwd_data),
+        .mem_wb_fwd_data    (mem_wb_fwd_data),
+
         .ex_mem_d           (ex_mem_d),
 
         .redirect_valid     (redirect_valid),
@@ -199,6 +223,24 @@ module riscv_core
         .wb_reg_write       (wb_reg_write),
         .wb_rd_addr         (wb_rd_addr),
         .wb_rd_wdata        (wb_rd_wdata)
+    );
+
+
+    // --------------------------------------------------------
+    // Instantiate Hazard unit
+    // --------------------------------------------------------
+
+    hazard_unit u_hazard_unit
+    (
+        .id_ex_d            (id_ex_d),
+        .id_ex_q            (id_ex_q),
+        .ex_mem_q           (ex_mem_q),
+        .mem_wb_q           (mem_wb_q),
+
+        .fwd_a_sel          (fwd_a_sel),
+        .fwd_b_sel          (fwd_b_sel),
+
+        .stall              (stall)
     );
 
 
