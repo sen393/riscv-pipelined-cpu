@@ -1,5 +1,8 @@
 module mem_stage
     import riscv_pkg::*;
+#(
+    parameter int unsigned DMEM_DEPTH = 256
+)
 (
     input   logic       clk,
 
@@ -18,20 +21,43 @@ module mem_stage
 
     logic           mem_write_en;
 
+    logic           mem_read_en;
+    byte_mask_t     mem_mask;
+
 
     // --------------------------------------------------------
-    // Memory write enable
+    // Memory read/write enable
     // --------------------------------------------------------
 
     assign mem_write_en = ex_mem_q.valid && ex_mem_q.ctrl.mem_write;
+    assign mem_read_en  = ex_mem_q.valid && ex_mem_q.ctrl.mem_read;
+
+
+    // --------------------------------------------------------
+    // Generate byte mask
+    // --------------------------------------------------------
+
+    always_comb begin
+        case (ex_mem_q.ctrl.mem_size)
+            MEM_BYTE    :   mem_mask = 4'b0001;
+            MEM_HALF    :   mem_mask = 4'b0011;
+            MEM_WORD    :   mem_mask = 4'b1111;
+            default     :   mem_mask = 4'b0000;
+        endcase
+
+        mem_mask = mem_mask << ex_mem_q.alu_result[1:0];
+
+    end
+
 
 
     // --------------------------------------------------------
     // Data memory
     // --------------------------------------------------------
 
-    data_mem u_data_mem
-    (
+    data_mem #(
+        .DEPTH      (DMEM_DEPTH)
+    ) u_data_mem (
         .clk        (clk),
         .write_en   (mem_write_en),
         .mem_size   (ex_mem_q.ctrl.mem_size),
@@ -52,6 +78,7 @@ module mem_stage
             2'b01   : load_byte = mem_read_data[15:8];
             2'b10   : load_byte = mem_read_data[23:16];
             2'b11   : load_byte = mem_read_data[31:24];
+            default : ;
 
         endcase
     end
@@ -66,6 +93,7 @@ module mem_stage
 
             1'b0    : load_half = mem_read_data[15:0];
             1'b1    : load_half = mem_read_data[31:16];
+            default : ;
 
         endcase
     end
@@ -91,7 +119,7 @@ module mem_stage
                 if (ex_mem_q.ctrl.load_unsigned)
                     load_data = {{16'd0}, load_half};
                 else
-                    load_data = {{16{load_half[7]}}, load_half};
+                    load_data = {{16{load_half[15]}}, load_half};
             end
 
             MEM_WORD    : begin
@@ -126,6 +154,33 @@ module mem_stage
         mem_wb_d.mem_data   = load_data;
 
         mem_wb_d.ctrl       = ex_mem_q.ctrl;
+
+        // ----------------------------------------------------
+        // Retirement Metadata
+        // ----------------------------------------------------
+
+        if (ex_mem_q.valid) begin
+            // Propagate metadata
+            mem_wb_d.meta = ex_mem_q.meta;
+
+            if (mem_read_en || mem_write_en) begin
+                mem_wb_d.meta.mem_addr = {
+                    ex_mem_q.alu_result[XLEN-1:2],
+                    2'b00
+                };
+            end
+
+            if (mem_read_en) begin
+                mem_wb_d.meta.mem_rmask = mem_mask;
+                mem_wb_d.meta.mem_rdata = mem_read_data;
+            end
+
+            if (mem_write_en) begin
+                mem_wb_d.meta.mem_wmask = mem_mask;
+                mem_wb_d.meta.mem_wdata =
+                    ex_mem_q.store_data << (8 * ex_mem_q.alu_result[1:0]);
+            end
+        end
     end
 
 

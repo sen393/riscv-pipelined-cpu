@@ -175,6 +175,30 @@ package riscv_pkg;
     } ctrl_t;
 
 
+
+    // ========================================================
+    // Retirement metadata
+    // ========================================================
+
+    typedef struct packed {
+        // Source reg info
+        reg_addr_t      rs1_addr;
+        reg_addr_t      rs2_addr;
+        word_t          rs1_rdata;
+        word_t          rs2_rdata;
+
+        // Resolved next pc
+        addr_t          next_pc;
+
+        // Memory info
+        addr_t          mem_addr;
+        byte_mask_t     mem_rmask;
+        byte_mask_t     mem_wmask;
+        word_t          mem_rdata;
+        word_t          mem_wdata;
+    } retire_meta_t;
+
+
     // ========================================================
     // Instruction Fetch/Decode Bundle
     // ========================================================
@@ -212,6 +236,8 @@ package riscv_pkg;
         word_t              imm;
 
         ctrl_t              ctrl;
+
+        retire_meta_t       meta;
     } id_ex_t;
 
 
@@ -235,6 +261,8 @@ package riscv_pkg;
         word_t              store_data; // store rs2_data
 
         ctrl_t              ctrl;
+
+        retire_meta_t       meta;
     } ex_mem_t;
 
 
@@ -258,34 +286,41 @@ package riscv_pkg;
         word_t              mem_data;   // new, from data mem
 
         ctrl_t              ctrl;
+
+        retire_meta_t       meta;
     } mem_wb_t;
 
 
     // ========================================================
-    // Formal Verification
+    // Retirement / Formal Verification Interface
     // ========================================================
 
     typedef struct packed {
+        // Retirement info
         logic         valid;
         logic [63:0]  order;
-
         instr_t       insn;
 
+        // Exception / interrupt information
         logic         trap;
         logic         halt;
         logic         intr;
 
+        // Source reg info
         reg_addr_t    rs1_addr;
         reg_addr_t    rs2_addr;
         word_t        rs1_rdata;
         word_t        rs2_rdata;
-
+        
+        // Destination reg info
         reg_addr_t    rd_addr;
         word_t        rd_wdata;
 
+        // Program counter info
         addr_t        pc_rdata;
         addr_t        pc_wdata;
 
+        // Memory info
         addr_t        mem_addr;
         byte_mask_t   mem_rmask;
         byte_mask_t   mem_wmask;

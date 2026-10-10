@@ -400,6 +400,17 @@ module decoder
             OPC_SYSTEM      : begin
             end
             OPC_MISC_MEM    : begin
+                case (funct3)
+                    3'b000  : begin
+                        // FENCE
+                        // no architectural side effects for this core
+                        ctrl.illegal    = 1'b0;
+                    end
+
+                    default : begin
+                        // Unsupported instructions
+                    end
+                endcase
             end
             default: ;
         endcase

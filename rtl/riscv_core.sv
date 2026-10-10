@@ -3,10 +3,13 @@ module riscv_core
 #(
     parameter   logic [XLEN-1:0]        RESET_PC = '0,
     parameter   int unsigned            IMEM_DEPTH = 256,
-    parameter   string                  IMEM_INIT_FILE = ""
+    parameter   string                  IMEM_INIT_FILE = "",
+    parameter   int unsigned            DMEM_DEPTH = 256
 )(
-    input   logic   clk,
-    input   logic   rst
+    input   logic       clk,
+    input   logic       rst,
+
+    output  retire_t    rvfi
 );
 
     // --------------------------------------------------------
@@ -188,8 +191,9 @@ module riscv_core
     // Instantiate MEM
     // --------------------------------------------------------
 
-    mem_stage u_mem_stage
-    (
+    mem_stage #(
+        .DMEM_DEPTH         (DMEM_DEPTH)
+    ) u_mem_stage (
         .clk                (clk),        
 
         .ex_mem_q           (ex_mem_q),
@@ -218,11 +222,16 @@ module riscv_core
 
     wb_stage u_wb_stage
     (
+        .clk                (clk),
+        .rst                (rst),
+
         .mem_wb_q           (mem_wb_q),
 
         .wb_reg_write       (wb_reg_write),
         .wb_rd_addr         (wb_rd_addr),
-        .wb_rd_wdata        (wb_rd_wdata)
+        .wb_rd_wdata        (wb_rd_wdata),
+
+        .rvfi               (rvfi)
     );
 
 

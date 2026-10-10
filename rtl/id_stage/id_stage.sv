@@ -108,6 +108,15 @@ module id_stage
         id_ex_d.imm         = imm_ext;
 
         id_ex_d.ctrl        = ctrl;
+
+        // ----------------------------------------------------
+        // Retirement Metadata
+        // ----------------------------------------------------
+
+        if (if_id_q.valid) begin
+            id_ex_d.meta.rs1_addr   = (ctrl.uses_rs1) ? rs1_addr : '0;
+            id_ex_d.meta.rs2_addr   = (ctrl.uses_rs2) ? rs2_addr : '0;
+        end
     end
 
 

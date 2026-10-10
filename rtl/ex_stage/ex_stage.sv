@@ -155,6 +155,22 @@ module ex_stage
         ex_mem_d.store_data = rs2_fwd;
 
         ex_mem_d.ctrl       = id_ex_q.ctrl;
+
+        // ----------------------------------------------------
+        // Retirement Metadata
+        // ----------------------------------------------------
+
+        if (id_ex_q.valid) begin
+            // Propogate existing metadata from ID
+            ex_mem_d.meta       = id_ex_q.meta;
+            
+            // Capture resolved rs1/rs2 data after fwd
+            ex_mem_d.meta.rs1_rdata = (id_ex_q.ctrl.uses_rs1) ? rs1_fwd : '0;
+            ex_mem_d.meta.rs2_rdata = (id_ex_q.ctrl.uses_rs2) ? rs2_fwd : '0;
+
+            // Capture next PC
+            ex_mem_d.meta.next_pc   = (branch_redirect_valid) ? branch_redirect_pc : id_ex_q.pc_plus4;
+        end
     end
 
 
