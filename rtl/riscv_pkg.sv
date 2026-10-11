@@ -150,28 +150,43 @@ package riscv_pkg;
 
 
     // ========================================================
+    // Exceptions
+    // ========================================================
+
+    typedef enum logic [1:0] {
+        EXC_NONE    = 2'd0,
+        EXC_ECALL   = 2'd1,
+        EXC_EBREAK  = 2'd2,
+        EXC_ILLEGAL = 2'd3
+    } exc_kind_e;
+
+
+
+    // ========================================================
     // Decoded Instruction Control
     // ========================================================
 
     typedef struct packed {
-        logic         illegal;
+        logic           illegal;
 
-        logic         reg_write;
-        logic         mem_read;
-        logic         mem_write;
+        logic           reg_write;
+        logic           mem_read;
+        logic           mem_write;
 
-        logic         uses_rs1;
-        logic         uses_rs2;
+        logic           uses_rs1;
+        logic           uses_rs2;
 
-        logic         load_unsigned;
+        logic           load_unsigned;
 
-        alu_op_e      alu_op;
-        imm_sel_e     imm_sel;
-        op_a_sel_e    op_a_sel;
-        op_b_sel_e    op_b_sel;
-        wb_sel_e      wb_sel;
-        cf_op_e       cf_op;
-        mem_size_e    mem_size; 
+        alu_op_e        alu_op;
+        imm_sel_e       imm_sel;
+        op_a_sel_e      op_a_sel;
+        op_b_sel_e      op_b_sel;
+        wb_sel_e        wb_sel;
+        cf_op_e         cf_op;
+        mem_size_e      mem_size; 
+
+        exc_kind_e      exc_kind;
     } ctrl_t;
 
 

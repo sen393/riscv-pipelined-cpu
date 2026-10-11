@@ -13,6 +13,29 @@ module riscv_core
 );
 
     // --------------------------------------------------------
+    // Exception control signals
+    // --------------------------------------------------------
+
+    logic       exception_pending_q;
+    logic       exception_accept;
+
+    assign exception_accept =
+        if_id_q.valid                           &&
+        (id_ex_d.ctrl.exc_kind != EXC_NONE)     &&
+        !stall                                  &&
+        !redirect_valid                         &&
+        !exception_pending_q;
+
+    always_ff @(posedge clk) begin
+        if (rst)
+            // Stuck on HIGH until rst, temporary solution
+            exception_pending_q <= 1'b0;
+        else if (exception_accept)
+            exception_pending_q <= 1'b1;
+    end
+
+
+    // --------------------------------------------------------
     // Pipeline control
     // --------------------------------------------------------
 
@@ -20,13 +43,27 @@ module riscv_core
     logic       if_id_en;
     logic       if_id_flush;
     logic       id_ex_flush;
-    logic       stall;
+    logic       stall;      // From hazard unit
 
-    assign if_id_flush  = redirect_valid;
-    assign id_ex_flush  = redirect_valid | stall;
+    // Stop fetching when exception accepted
+    assign pc_en = 
+        redirect_valid |
+        (~stall & ~exception_accept & ~exception_pending_q);
 
-    assign pc_en        = redirect_valid | ~stall;
-    assign if_id_en     = ~stall;
+    // Flush younger instructions from IF/ID
+    assign if_id_flush =
+        redirect_valid      |
+        exception_accept    |
+        exception_pending_q;
+
+    // Allow IF/ID to be cleared even during a stall
+    assign if_id_en = ~stall | if_id_flush;
+
+    // Insert bubbles into ID/EX after ECALL advances
+    assign id_ex_flush =
+        redirect_valid      |
+        stall               |
+        exception_pending_q;
 
 
     // --------------------------------------------------------

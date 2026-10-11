@@ -25,6 +25,7 @@ module decoder
         ctrl.wb_sel     = WB_ALU;
         ctrl.cf_op      = CF_NONE;
         ctrl.mem_size   = MEM_WORD;
+        // note ctrl = '0 sets exc_kind to EXC_NONE
 
         case (opcode)
 
@@ -396,9 +397,29 @@ module decoder
                 ctrl.cf_op      = CF_JAL;
             end
 
-            // Not implemented, until after first version
             OPC_SYSTEM      : begin
+                case (instr)
+
+                    32'h00000073    : begin
+                        // ECALL
+                        ctrl.illegal    = 1'b0;
+                        ctrl.exc_kind   = EXC_ECALL;
+                    end
+
+                    32'h00100073    : begin
+                        // EBREAK
+                        ctrl.illegal    = 1'b0;
+                        ctrl.exc_kind   = EXC_EBREAK;
+                    end
+
+                    default         : begin
+                        // Unsupported SYSTEM instr
+                        // leave illegal instr defaults
+                    end
+
+                endcase
             end
+
             OPC_MISC_MEM    : begin
                 case (funct3)
                     3'b000  : begin
@@ -412,6 +433,7 @@ module decoder
                     end
                 endcase
             end
+
             default: ;
         endcase
 

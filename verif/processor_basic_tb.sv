@@ -11,7 +11,7 @@ module processor_basic_tb;
 
     localparam int unsigned CLK_PERIOD = 10;
     localparam int unsigned MAX_CYCLES = 60;
-    localparam int unsigned NUM_TEST_INSTRS = 5;
+    localparam int unsigned NUM_TEST_INSTRS = 2;
 
     // --------------------------------------------------------
     // DUT signals
@@ -28,7 +28,7 @@ module processor_basic_tb;
     // --------------------------------------------------------
 
     riscv_core #(
-        .IMEM_INIT_FILE("../verif/programs/fence.hex")
+        .IMEM_INIT_FILE("../verif/programs/ebreak.hex")
     ) u_dut (
         .clk    (clk),
         .rst    (rst),
@@ -94,13 +94,30 @@ module processor_basic_tb;
 
                 retire_count++;
 
-                if (retire_count == NUM_TEST_INSTRS) begin
-                    $display("--------------------------------");
-                    $display("Retired %0d instructions",
-                             retire_count);
-                    $finish;
-                end
+               if (retire_count == NUM_TEST_INSTRS) begin
 
+                    // Verify EBREAK instruction and trap
+                    if (rvfi.insn !== 32'h00100073 || rvfi.trap !== 1'b1)
+                        $fatal(1, "Expected EBREAK trap");
+
+                    // Verify exception PC
+                    if (rvfi.pc_rdata !== 32'h00000004)
+                        $fatal(1, "Exception occurred at incorrect PC");
+
+                    $display("[TRAP] EBREAK at PC=%08h", rvfi.pc_rdata);
+
+                    // Verify no younger instructions retire
+                    repeat (8) begin
+                        @(negedge clk);
+
+                        if (rvfi.valid)
+                            $fatal(1, "Unexpected retirement after EBREAK");
+                    end
+
+                    $display("EBREAK TEST PASSED");
+                    $finish;
+
+                end 
             end
         end
 

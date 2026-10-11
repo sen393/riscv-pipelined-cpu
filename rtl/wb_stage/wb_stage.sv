@@ -98,7 +98,9 @@ module wb_stage
             rvfi.mem_rdata = mem_wb_q.meta.mem_rdata;
             rvfi.mem_wdata = mem_wb_q.meta.mem_wdata;
 
-            // trap, halt, and intr remain zero
+            rvfi.trap =
+                mem_wb_q.valid  &&
+                (mem_wb_q.ctrl.exc_kind != EXC_NONE);
         end
     end
 
