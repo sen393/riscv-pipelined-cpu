@@ -437,6 +437,14 @@ module decoder
             default: ;
         endcase
 
+        // Illegal function exception
+
+        if (ctrl.illegal) begin
+            ctrl = '0;
+            ctrl.illegal    = 1'b1;
+            ctrl.exc_kind   = EXC_ILLEGAL;
+        end
+
         // Illegal function cleanup
         if (ctrl.illegal) begin
             ctrl.reg_write  = 1'b0;

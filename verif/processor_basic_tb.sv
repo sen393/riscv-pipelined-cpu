@@ -11,7 +11,7 @@ module processor_basic_tb;
 
     localparam int unsigned CLK_PERIOD = 10;
     localparam int unsigned MAX_CYCLES = 60;
-    localparam int unsigned NUM_TEST_INSTRS = 2;
+    localparam int unsigned NUM_TEST_INSTRS = 3;
 
     // --------------------------------------------------------
     // DUT signals
@@ -28,7 +28,7 @@ module processor_basic_tb;
     // --------------------------------------------------------
 
     riscv_core #(
-        .IMEM_INIT_FILE("../verif/programs/ebreak.hex")
+        .IMEM_INIT_FILE("../verif/programs/illegal.hex")
     ) u_dut (
         .clk    (clk),
         .rst    (rst),
@@ -94,30 +94,37 @@ module processor_basic_tb;
 
                 retire_count++;
 
-               if (retire_count == NUM_TEST_INSTRS) begin
 
-                    // Verify EBREAK instruction and trap
-                    if (rvfi.insn !== 32'h00100073 || rvfi.trap !== 1'b1)
-                        $fatal(1, "Expected EBREAK trap");
 
-                    // Verify exception PC
-                    if (rvfi.pc_rdata !== 32'h00000004)
-                        $fatal(1, "Exception occurred at incorrect PC");
+                if (retire_count == NUM_TEST_INSTRS) begin
 
-                    $display("[TRAP] EBREAK at PC=%08h", rvfi.pc_rdata);
+                    if (rvfi.insn !== 32'h00000000 || rvfi.trap !== 1'b1)
+                        $fatal(1, "Expected illegal instruction trap");
 
-                    // Verify no younger instructions retire
+                    if (u_dut.u_mem_stage.u_data_mem.mem[0] !== 32'd42)
+                        $fatal(1, "Younger store incorrectly modified memory");
+                        $display("PRECISE EXCEPTION TEST PASSED");
+
+                    if (rvfi.pc_rdata !== 32'h00000008)
+                        $fatal(1, "Incorrect exception PC");
+
+                    $display("[TRAP] Illegal instruction at PC=%08h",
+                            rvfi.pc_rdata);
+
                     repeat (8) begin
                         @(negedge clk);
 
                         if (rvfi.valid)
-                            $fatal(1, "Unexpected retirement after EBREAK");
+                            $fatal(1, "Unexpected retirement after exception");
                     end
 
-                    $display("EBREAK TEST PASSED");
+                    $display("ILLEGAL INSTRUCTION TEST PASSED");
                     $finish;
 
-                end 
+                end
+
+
+
             end
         end
 
