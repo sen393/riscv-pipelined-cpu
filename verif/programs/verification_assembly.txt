@@ -1,0 +1,224 @@
+RISC-V PIPELINED CPU — DIRECTED REGRESSION ASSEMBLY
+==================================================
+
+These are the RV32I assembly listings corresponding to the tested memory,
+hazard, and system regressions. Each section is a separate program and must
+be assembled/run separately, not concatenated into one instruction image.
+
+The memory source has been reconstructed from memory.hex. The hazard source
+comes from hazard.S. The system sources are aligned exactly to their HEX
+images: system_fault includes five padding NOPs; system_fence uses the exact
+zero-mask FENCE instruction from the tested HEX file.
+
+The system testbench replaces instruction word 4 (PC 0x10) of system_fault
+with a selected 32-bit word for each +CASE=... simulation. See the case
+encoding reference at the end of this document.
+
+
+============================================================================
+1. MEMORY REGRESSION — 26 checked instructions + loop sentinel
+============================================================================
+
+# Directed RV32I multi-instruction memory regression
+# Reconstructed from verif/programs/memory.hex.
+# Expected values are documented in processor_memory_tb.sv.
+# 26 checked instructions, followed by an untested infinite-loop sentinel.
+.option norvc
+.text
+.globl _start
+_start:
+
+# Construct 0x12345678 and check full-word/partial-width loads.
+    addi x1, x0, 128        # PC 0x00: base address = 0x80
+    lui  x2, 0x12345        # PC 0x04: x2 = 0x12345000
+    addi x2, x2, 0x678      # PC 0x08: x2 = 0x12345678
+    sw   x2, 0(x1)          # PC 0x0c: M[0x80] = 0x12345678
+    lw   x3, 0(x1)          # PC 0x10: x3 = 0x12345678
+    lb   x4, 3(x1)          # PC 0x14: x4 = 0x00000012
+    lbu  x5, 2(x1)          # PC 0x18: x5 = 0x00000034
+    lh   x6, 2(x1)          # PC 0x1c: x6 = 0x00001234
+    lhu  x7, 0(x1)          # PC 0x20: x7 = 0x00005678
+
+# Overlapping byte and halfword writes, plus sign/zero extension.
+    addi x8, x0, -1         # PC 0x24: x8 = 0xFFFFFFFF
+    sb   x8, 1(x1)          # PC 0x28: M[0x80] = 0x1234FF78
+    lw   x9, 0(x1)          # PC 0x2c: x9 = 0x1234FF78
+    lb   x10, 1(x1)         # PC 0x30: x10 = 0xFFFFFFFF
+    lbu  x11, 1(x1)         # PC 0x34: x11 = 0x000000FF
+    sh   x8, 2(x1)          # PC 0x38: M[0x80] = 0xFFFFFF78
+    lw   x12, 0(x1)         # PC 0x3c: x12 = 0xFFFFFF78
+    lh   x13, 2(x1)         # PC 0x40: x13 = 0xFFFFFFFF
+    lhu  x14, 2(x1)         # PC 0x44: x14 = 0x0000FFFF
+
+# Neighboring-word independence and data dependencies.
+    sw   x2, 4(x1)          # PC 0x48: M[0x84] = 0x12345678
+    sb   x8, 4(x1)          # PC 0x4c: M[0x84] = 0x123456FF
+    lw   x15, 4(x1)         # PC 0x50: x15 = 0x123456FF
+    lw   x16, 0(x1)         # PC 0x54: x16 = 0xFFFFFF78
+    addi x17, x16, 1        # PC 0x58: load-use, x17 = 0xFFFFFF79
+    addi x18, x17, 1        # PC 0x5c: EX forwarding, x18 = 0xFFFFFF7A
+    sw   x17, 8(x1)         # PC 0x60: M[0x88] = 0xFFFFFF79
+    lw   x19, 8(x1)         # PC 0x64: x19 = 0xFFFFFF79
+
+# Extra instruction in the ROM; the regression stops at 26 retirements.
+spin:
+    jal  x0, spin          # PC 0x68: jump to self
+
+============================================================================
+2. HAZARD REGRESSION — 57 instruction words, 48 retirements
+============================================================================
+
+# Directed RV32I pipeline hazard regression
+# Assemble in RV32I mode with compressed instructions disabled.
+# The instruction order is intentional: changing it changes hazard timing.
+# jalr target below is absolute 0x8c, so update it if earlier code moves.
+.option norvc
+.text
+.globl _start
+_start:
+
+# Basic ALU forwarding and forwarding priority
+    addi x1, x0, 128                            # PC 0x000
+    addi x2, x0, 5                              # PC 0x004
+    addi x3, x2, 7                              # PC 0x008
+    add x4, x3, x2                              # PC 0x00c
+    add x5, x4, x3                              # PC 0x010
+    addi x6, x0, 1                              # PC 0x014
+    addi x6, x6, 2                              # PC 0x018
+    addi x7, x6, 4                              # PC 0x01c
+    addi x6, x0, 8                              # PC 0x020
+    addi x6, x0, 9                              # PC 0x024
+    addi x8, x6, 0                              # PC 0x028
+    addi x0, x0, 123                            # PC 0x02c
+    addi x9, x0, 1                              # PC 0x030
+
+# Load/use stalls and load-to-store forwarding
+    sw x5, 0(x1)                                # PC 0x034
+    lw x10, 0(x1)                               # PC 0x038
+    add x11, x10, x2                            # PC 0x03c
+    lw x12, 0(x1)                               # PC 0x040
+    add x13, x2, x12                            # PC 0x044
+    lw x14, 0(x1)                               # PC 0x048
+    sw x14, 4(x1)                               # PC 0x04c
+    lw x15, 4(x1)                               # PC 0x050
+
+# Conditional branches and wrong-path flushing
+    addi x16, x0, 3                             # PC 0x054
+    addi x16, x16, 1                            # PC 0x058
+    beq x16, x0, wrong_branch                   # PC 0x05c
+    bne x16, x2, after_branch                   # PC 0x060
+wrong_branch:
+    sw x5, 8(x1)                                # PC 0x064
+    addi x17, x0, 99                            # PC 0x068
+after_branch:
+    addi x18, x0, 11                            # PC 0x06c
+
+# JAL and JALR forwarding/flushing
+    jal x19, after_jal                          # PC 0x070
+    sw x5, 12(x1)                               # PC 0x074
+    addi x20, x0, 99                            # PC 0x078
+after_jal:
+    addi x21, x19, 1                            # PC 0x07c
+    addi x22, x0, 141                           # PC 0x080
+    jalr x23, 0(x22)                            # PC 0x084
+    sw x5, 16(x1)                               # PC 0x088
+after_jalr:
+    addi x24, x23, 2                            # PC 0x08c
+
+# Load-to-branch dependency
+    lw x25, 0(x1)                               # PC 0x090
+    beq x25, x5, after_load_branch              # PC 0x094
+    sw x5, 20(x1)                               # PC 0x098
+    addi x26, x0, 111                           # PC 0x09c
+after_load_branch:
+    add x27, x24, x11                           # PC 0x0a0
+    addi x28, x0, 0                             # PC 0x0a4
+    bne x28, x0, skip_other                     # PC 0x0a8
+    addi x29, x0, 55                            # PC 0x0ac
+skip_other:
+
+# Memory-after-ALU and branch rs2 forwarding
+    sw x27, 24(x1)                              # PC 0x0b0
+    lw x30, 24(x1)                              # PC 0x0b4
+    addi x31, x0, 29                            # PC 0x0b8
+    beq x5, x31, after_forward_branch           # PC 0x0bc
+    sw x5, 28(x1)                               # PC 0x0c0
+    addi x1, x0, 1                              # PC 0x0c4
+after_forward_branch:
+
+# WB-to-ID register-file bypass
+    addi x3, x0, 77                             # PC 0x0c8
+    addi x4, x0, 100                            # PC 0x0cc
+    addi x0, x0, 0                              # PC 0x0d0
+    addi x0, x0, 0                              # PC 0x0d4
+    addi x7, x4, 1                              # PC 0x0d8
+    sw x7, 28(x1)                               # PC 0x0dc
+    lw x8, 28(x1)                               # PC 0x0e0
+
+============================================================================
+3. SYSTEM REGRESSION — FENCE PROGRAM
+============================================================================
+
+# Matches the tested system_fence.hex instruction-for-instruction.
+# Reference assembly for system_fence.hex (not assembled by the Makefile).
+
+    addi x1, x0, 128       # base address = 0x80
+    addi x2, x0, 42
+    addi x6, x0, 7         # sentinel register
+    sw   x2, 0(x1)         # older store MUST commit
+    .word 0x00211163      # bne x2, x2, +2 : NOT TAKEN (odd halfword target if taken)
+    .word 0x0000000f       # FENCE with zero pred/succ (exact tested HEX encoding)
+    fence iorw, iorw       # nonzero predecessor/successor set
+    lw   x3, 0(x1)         # expect 42
+    addi x4, x3, 1        # expect 43
+    ecall                  # expected termination by trap
+    addi x6, x0, 99       # younger: MUST NOT commit
+    sw   x2, 4(x1)        # younger: MUST NOT change 0x84
+
+============================================================================
+4. SYSTEM REGRESSION — FAULT TEMPLATE PROGRAM
+============================================================================
+
+# Matches the 12-word tested system_fault.hex before runtime patching.
+# Reference assembly for system_fault.hex (not assembled by the Makefile).
+# The testbench replaces word 4 with the encoding selected by +CASE=... .
+# A separate simulation is launched for each fault case.
+
+    addi x1, x0, 128       # base address = 0x80
+    addi x2, x0, 42        # value for older store
+    addi x6, x0, 7         # sentinel register; must survive fault
+    sw   x2, 0(x1)         # older store MUST commit
+    .word 0x00000073      # FAULT SLOT: overwritten by testbench
+    addi x6, x0, 99        # younger: MUST NOT commit
+    sw   x2, 4(x1)         # younger: MUST NOT change 0x84
+
+    # The HEX file pads to 12 words with NOPs.
+    addi x0, x0, 0         # PC 0x1c: NOP
+    addi x0, x0, 0         # PC 0x20: NOP
+    addi x0, x0, 0         # PC 0x24: NOP
+    addi x0, x0, 0         # PC 0x28: NOP
+    addi x0, x0, 0         # PC 0x2c: NOP
+
+============================================================================
+5. SYSTEM FAULT-SLOT CASE REFERENCE (PC = 0x10)
+============================================================================
+
+Each line describes an alternative instruction inserted into word 4 by
+processor_system_tb.sv; these are NOT executed sequentially.
+
++CASE=ecall              0x00000073   ecall
++CASE=ebreak             0x00100073   ebreak
++CASE=illegal            0x00000000   illegal 32-bit encoding
++CASE=illegal_system     0x30200073   mret (unsupported privileged instruction)
++CASE=illegal_load       0x0000b303   invalid LOAD funct3 encoding
++CASE=illegal_fence_i    0x0000100f   fence.i (unsupported extension)
++CASE=lw_misaligned      0x0020a303   lw x6, 2(x1)
++CASE=lh_misaligned      0x00109303   lh x6, 1(x1)
++CASE=sw_misaligned      0x0020a123   sw x2, 2(x1)
++CASE=sh_misaligned      0x002090a3   sh x2, 1(x1)
++CASE=jal_misaligned     0x0020036f   jal x6, +2
++CASE=jalr_misaligned    0x00208367   jalr x6, 2(x1)
++CASE=branch_misaligned  0x00210163   beq x2, x2, +2
+
++CASE=fence uses system_fence.hex without patching the instruction at PC 0x10.
+Its final ECALL at PC 0x24 intentionally terminates the test.
