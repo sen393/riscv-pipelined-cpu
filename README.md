@@ -8,7 +8,7 @@ The project builds on a [single-cycle RV32I processor](https://github.com/sen393
 
 ## Architecture
 
-![RISC-V Pipelined CPU Architecture](docs/pipelined-arch-diagram-1-1.svg)
+![RISC-V Pipelined CPU Architecture](docs/pipelined-arch-diagram-1-6.svg)
 
 - **IF — Instruction Fetch:** Program counter, instruction ROM, sequential fetch, and branch/jump redirects.
 - **ID — Instruction Decode:** Instruction decoding, immediate generation, and two-read/one-write integer register file.
