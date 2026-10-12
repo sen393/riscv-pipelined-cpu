@@ -34,8 +34,10 @@ module wb_stage
         wb_rd_addr      = mem_wb_q.rd;
 
         // Only allow valid instr to write reg
-        wb_reg_write    =   mem_wb_q.valid          &&
-                            mem_wb_q.ctrl.reg_write &&
+        wb_reg_write    =   mem_wb_q.valid                          &&
+                            !rst                                    &&
+                            (mem_wb_q.ctrl.exc_kind == EXC_NONE)    &&
+                            mem_wb_q.ctrl.reg_write                 &&
                             (mem_wb_q.rd != '0);  
 
         // Writeback mux
@@ -101,6 +103,16 @@ module wb_stage
             rvfi.trap =
                 mem_wb_q.valid  &&
                 (mem_wb_q.ctrl.exc_kind != EXC_NONE);
+            
+            // Current design permanently halts on exceptions
+            rvfi.halt = rvfi.trap;
+
+            // No interrupt/trap handler support
+            rvfi.intr = 1'b0;
+
+            // Fixed architecture
+            rvfi.mode = 2'd3;   // Use only machine mode for verif
+            rvfi.ixl  = 2'd1;   // RV32 = 1, RV64 = 2
         end
     end
 

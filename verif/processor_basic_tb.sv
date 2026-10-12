@@ -103,7 +103,8 @@ module processor_basic_tb;
 
                     if (u_dut.u_mem_stage.u_data_mem.mem[0] !== 32'd42)
                         $fatal(1, "Younger store incorrectly modified memory");
-                        $display("PRECISE EXCEPTION TEST PASSED");
+                    
+                    $display("PRECISE EXCEPTION TEST PASSED");
 
                     if (rvfi.pc_rdata !== 32'h00000008)
                         $fatal(1, "Incorrect exception PC");

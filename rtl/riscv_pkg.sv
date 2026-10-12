@@ -153,11 +153,14 @@ package riscv_pkg;
     // Exceptions
     // ========================================================
 
-    typedef enum logic [1:0] {
-        EXC_NONE    = 2'd0,
-        EXC_ECALL   = 2'd1,
-        EXC_EBREAK  = 2'd2,
-        EXC_ILLEGAL = 2'd3
+    typedef enum logic [2:0] {
+        EXC_NONE                = 3'd0,
+        EXC_ECALL               = 3'd1,
+        EXC_EBREAK              = 3'd2,
+        EXC_ILLEGAL             = 3'd3,
+        EXC_INSTR_MISALIGNED    = 3'd4,
+        EXC_LOAD_MISALIGNED     = 3'd5,
+        EXC_STORE_MISALIGNED    = 3'd6
     } exc_kind_e;
 
 
@@ -316,31 +319,35 @@ package riscv_pkg;
         logic [63:0]  order;
         instr_t       insn;
 
-        // Exception / interrupt information
-        logic         trap;
-        logic         halt;
-        logic         intr;
+        // Exception / interrupt info
+        logic           trap;
+        logic           halt;
+        logic           intr;
+
+        // Privilege / architecture info
+        logic [1:0]     mode;
+        logic [1:0]     ixl;
 
         // Source reg info
-        reg_addr_t    rs1_addr;
-        reg_addr_t    rs2_addr;
-        word_t        rs1_rdata;
-        word_t        rs2_rdata;
+        reg_addr_t      rs1_addr;
+        reg_addr_t      rs2_addr;
+        word_t          rs1_rdata;
+        word_t          rs2_rdata;
         
         // Destination reg info
-        reg_addr_t    rd_addr;
-        word_t        rd_wdata;
+        reg_addr_t      rd_addr;
+        word_t          rd_wdata;
 
         // Program counter info
-        addr_t        pc_rdata;
-        addr_t        pc_wdata;
+        addr_t          pc_rdata;
+        addr_t          pc_wdata;
 
         // Memory info
-        addr_t        mem_addr;
-        byte_mask_t   mem_rmask;
-        byte_mask_t   mem_wmask;
-        word_t        mem_rdata;
-        word_t        mem_wdata;
+        addr_t          mem_addr;
+        byte_mask_t     mem_rmask;
+        byte_mask_t     mem_wmask;
+        word_t          mem_rdata;
+        word_t          mem_wdata;
     } retire_t;
 
 

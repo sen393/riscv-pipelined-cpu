@@ -16,8 +16,12 @@ module ex_stage
     output  ex_mem_t    ex_mem_d,
 
     // Control-flow logic back to fetch
-    output   logic       redirect_valid, 
-    output   addr_t      redirect_pc
+    output  logic       redirect_valid, 
+    output  addr_t      redirect_pc,
+
+    // Exception detected in EX
+    output  logic       instr_addr_misaligned,
+    output  logic       data_addr_misaligned
 );
 
     // --------------------------------------------------------
@@ -128,10 +132,45 @@ module ex_stage
 
 
     // --------------------------------------------------------
+    // Instruction address alignment check
+    // --------------------------------------------------------
+
+    assign instr_addr_misaligned =
+        id_ex_q.valid           &&
+        branch_redirect_valid   &&
+        (branch_redirect_pc[1:0] != 2'b00);
+
+
+    // --------------------------------------------------------
+    // Data address alignment check
+    // --------------------------------------------------------
+
+    always_comb begin
+        data_addr_misaligned = 1'b0;
+
+        if (id_ex_q.valid &&
+            (id_ex_q.ctrl.mem_read || id_ex_q.ctrl.mem_write)) begin
+            
+            case (id_ex_q.ctrl.mem_size)
+                MEM_BYTE    : data_addr_misaligned = 1'b0;
+                MEM_HALF    : data_addr_misaligned = alu_result[0];
+                MEM_WORD    : data_addr_misaligned = |alu_result[1:0];
+                default     : data_addr_misaligned = 1'b0;
+            endcase
+
+        end
+    end
+
+
+
+    // --------------------------------------------------------
     // Control-flow redirect
     // --------------------------------------------------------
 
-    assign redirect_valid   = id_ex_q.valid && branch_redirect_valid;
+    assign redirect_valid   =   id_ex_q.valid           &&
+                                branch_redirect_valid   &&
+                                !instr_addr_misaligned;
+
     assign redirect_pc      = branch_redirect_pc;
 
 
@@ -170,6 +209,28 @@ module ex_stage
 
             // Capture next PC
             ex_mem_d.meta.next_pc   = (branch_redirect_valid) ? branch_redirect_pc : id_ex_q.pc_plus4;
+
+            // ------------------------------------------------
+            // EX-stage exceptions
+            // ------------------------------------------------
+
+            if (instr_addr_misaligned)
+                ex_mem_d.ctrl.exc_kind  = EXC_INSTR_MISALIGNED;
+
+            else if (data_addr_misaligned) begin
+                ex_mem_d.ctrl.exc_kind  =
+                    id_ex_q.ctrl.mem_read   ?
+                    EXC_LOAD_MISALIGNED     :
+                    EXC_STORE_MISALIGNED;
+            end
+
+
+            if (instr_addr_misaligned || data_addr_misaligned) begin
+                // Must not commit reg or mem changes
+                ex_mem_d.ctrl.reg_write = 1'b0;
+                ex_mem_d.ctrl.mem_read  = 1'b0;
+                ex_mem_d.ctrl.mem_write = 1'b0;
+            end
         end
     end
 

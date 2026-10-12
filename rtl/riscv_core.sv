@@ -19,20 +19,9 @@ module riscv_core
     logic       exception_pending_q;
     logic       exception_accept;
 
-    assign exception_accept =
-        if_id_q.valid                           &&
-        (id_ex_d.ctrl.exc_kind != EXC_NONE)     &&
-        !stall                                  &&
-        !redirect_valid                         &&
-        !exception_pending_q;
-
-    always_ff @(posedge clk) begin
-        if (rst)
-            // Stuck on HIGH until rst, temporary solution
-            exception_pending_q <= 1'b0;
-        else if (exception_accept)
-            exception_pending_q <= 1'b1;
-    end
+    logic       ex_instr_addr_misaligned;
+    logic       ex_data_addr_misaligned;
+    logic       ex_exception;
 
 
     // --------------------------------------------------------
@@ -44,26 +33,6 @@ module riscv_core
     logic       if_id_flush;
     logic       id_ex_flush;
     logic       stall;      // From hazard unit
-
-    // Stop fetching when exception accepted
-    assign pc_en = 
-        redirect_valid |
-        (~stall & ~exception_accept & ~exception_pending_q);
-
-    // Flush younger instructions from IF/ID
-    assign if_id_flush =
-        redirect_valid      |
-        exception_accept    |
-        exception_pending_q;
-
-    // Allow IF/ID to be cleared even during a stall
-    assign if_id_en = ~stall | if_id_flush;
-
-    // Insert bubbles into ID/EX after ECALL advances
-    assign id_ex_flush =
-        redirect_valid      |
-        stall               |
-        exception_pending_q;
 
 
     // --------------------------------------------------------
@@ -110,6 +79,11 @@ module riscv_core
     word_t      ex_mem_fwd_data;
     word_t      mem_wb_fwd_data;
 
+
+    // --------------------------------------------------------
+    // Hazard/Forwarding logic
+    // --------------------------------------------------------
+
     assign mem_wb_fwd_data = wb_rd_wdata;
     always_comb begin
         case (ex_mem_q.ctrl.wb_sel)
@@ -119,6 +93,79 @@ module riscv_core
             default : ex_mem_fwd_data = '0;
         endcase
     end
+
+
+    // --------------------------------------------------------
+    // Exception control logic
+    // --------------------------------------------------------
+
+    assign exception_accept =
+        if_id_q.valid                           &&
+        (id_ex_d.ctrl.exc_kind != EXC_NONE)     &&
+        !stall                                  &&
+        !redirect_valid                         &&
+        !ex_exception                           &&
+        !exception_pending_q;
+
+    assign ex_exception =
+        ex_instr_addr_misaligned || ex_data_addr_misaligned;
+
+    always_ff @(posedge clk) begin
+        if (rst)
+            // Stuck on HIGH until rst, temporary solution
+            exception_pending_q <= 1'b0;
+        else if (exception_accept || ex_exception)
+            exception_pending_q <= 1'b1;
+    end
+
+
+    // --------------------------------------------------------
+    // Instantiate Hazard unit
+    // --------------------------------------------------------
+
+    hazard_unit u_hazard_unit
+    (
+        .id_ex_d            (id_ex_d),
+        .id_ex_q            (id_ex_q),
+        .ex_mem_q           (ex_mem_q),
+        .mem_wb_q           (mem_wb_q),
+
+        .fwd_a_sel          (fwd_a_sel),
+        .fwd_b_sel          (fwd_b_sel),
+
+        .stall              (stall)
+    );
+
+
+    // --------------------------------------------------------
+    // Pipeline control
+    // --------------------------------------------------------
+
+    // Stop fetching when exception accepted
+    assign pc_en = 
+        redirect_valid |
+       (~stall                      &&
+        ~exception_accept           &&
+        ~ex_exception               &&
+        ~exception_pending_q);
+
+    // Flush younger instructions from IF/ID
+    assign if_id_flush =
+        redirect_valid              |
+        exception_accept            |
+        ex_exception                |
+        exception_pending_q;
+
+    // Allow IF/ID to be cleared even during a stall
+    assign if_id_en = ~stall | if_id_flush;
+
+    // Insert bubbles into ID/EX after ECALL advances
+    assign id_ex_flush =
+        redirect_valid              |
+        stall                       |
+        ex_exception                |
+        exception_pending_q;
+
 
     // --------------------------------------------------------
     // Instantiate IF
@@ -195,18 +242,21 @@ module riscv_core
 
     ex_stage u_ex_stage
     (
-        .id_ex_q            (id_ex_q),
+        .id_ex_q                (id_ex_q),
 
-        .fwd_a_sel          (fwd_a_sel),
-        .fwd_b_sel          (fwd_b_sel),
+        .fwd_a_sel              (fwd_a_sel),
+        .fwd_b_sel              (fwd_b_sel),
 
-        .ex_mem_fwd_data    (ex_mem_fwd_data),
-        .mem_wb_fwd_data    (mem_wb_fwd_data),
+        .ex_mem_fwd_data        (ex_mem_fwd_data),
+        .mem_wb_fwd_data        (mem_wb_fwd_data),
 
-        .ex_mem_d           (ex_mem_d),
+        .ex_mem_d               (ex_mem_d),
 
-        .redirect_valid     (redirect_valid),
-        .redirect_pc        (redirect_pc)
+        .redirect_valid         (redirect_valid),
+        .redirect_pc            (redirect_pc),
+
+        .instr_addr_misaligned  (ex_instr_addr_misaligned),
+        .data_addr_misaligned   (ex_data_addr_misaligned)
     );
 
 
@@ -269,24 +319,6 @@ module riscv_core
         .wb_rd_wdata        (wb_rd_wdata),
 
         .rvfi               (rvfi)
-    );
-
-
-    // --------------------------------------------------------
-    // Instantiate Hazard unit
-    // --------------------------------------------------------
-
-    hazard_unit u_hazard_unit
-    (
-        .id_ex_d            (id_ex_d),
-        .id_ex_q            (id_ex_q),
-        .ex_mem_q           (ex_mem_q),
-        .mem_wb_q           (mem_wb_q),
-
-        .fwd_a_sel          (fwd_a_sel),
-        .fwd_b_sel          (fwd_b_sel),
-
-        .stall              (stall)
     );
 
 

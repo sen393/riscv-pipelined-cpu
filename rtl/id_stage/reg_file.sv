@@ -20,9 +20,31 @@ module reg_file
             x[rd_addr] <= rd_wdata;
     end
 
-    // Asynchronous read ports
-    assign rs1_data = ( rs1_addr == '0 ) ? '0 : x[rs1_addr];
-    assign rs2_data = ( rs2_addr == '0 ) ? '0 : x[rs2_addr];
+
+    // Register read with WB-to-ID bypass
+    always_comb begin
+
+        // Default: x0 always returns zero
+        rs1_data = '0;
+        rs2_data = '0;
+
+        // Read rs1
+        if (rs1_addr != '0) begin
+            if (rd_we && (rd_addr == rs1_addr))
+                rs1_data = rd_wdata;
+            else
+                rs1_data = x[rs1_addr];
+        end
+
+        // Read rs2
+        if (rs2_addr != '0) begin
+            if (rd_we && (rd_addr == rs2_addr))
+                rs2_data = rd_wdata;
+            else
+                rs2_data = x[rs2_addr];
+        end
+
+    end
 
 endmodule
 

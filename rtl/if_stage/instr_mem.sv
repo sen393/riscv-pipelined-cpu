@@ -10,20 +10,60 @@ module instr_mem
 
     localparam int unsigned ADDR_WIDTH = $clog2(DEPTH);
 
-    instr_t mem [0:DEPTH-1];
-
     logic [ADDR_WIDTH-1:0] word_addr;
 
     // Divide addr by 4
     assign word_addr = addr[ADDR_WIDTH+1:2];
 
-    // Read instructions from given file path INIT_FILE
-    initial begin
-        if (INIT_FILE != "")
-            $readmemh(INIT_FILE, mem);
-    end
+    /*
+    `ifdef RISCV_FORMAL
+        // --------------------------------------------------------
+        // Formal Verification Instr Mem
+        // --------------------------------------------------------
 
-    assign instr = mem[word_addr];
+        (* anyconst *) logic [DEPTH * ILEN - 1 : 0] formal_mem;
+
+        // Select instruction at requested word addr 
+        assign instr = formal_mem[word_addr*ILEN +: ILEN];
+
+    `else
+
+        // --------------------------------------------------------
+        // Simulation / FPGA Instr Mem
+        // --------------------------------------------------------
+
+            instr_t mem [0:DEPTH-1];
+
+            // Read instructions from given file path INIT_FILE
+            initial begin
+                if (INIT_FILE != "")
+                    $readmemh(INIT_FILE, mem);
+            end
+
+            assign instr = mem[word_addr];
+
+    `endif
+    */
+
+    `ifdef RISCV_FORMAL
+
+        formal_instr_rom u_formal_instr_rom (
+            .addr  (addr),
+            .instr (instr)
+        );
+
+    `else
+
+        instr_t mem [0:DEPTH-1];
+
+        initial begin
+            if (INIT_FILE != "")
+                $readmemh(INIT_FILE, mem);
+        end
+
+        assign instr = mem[word_addr];
+
+    `endif
 
 endmodule
 
