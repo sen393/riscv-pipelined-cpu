@@ -8,7 +8,7 @@ The project builds on a previous project ([single-cycle RV32I processor](https:/
 
 ## Architecture
 
-![RISC-V Pipelined CPU Architecture](docs/pipelined-arch-diagram-1-6.svg)
+![RISC-V Pipelined CPU Architecture](docs/images/pipelined-arch-diagram-1-6.svg)
 
 - **IF — Instruction Fetch:** Program counter, instruction ROM, sequential fetch, and branch/jump redirects
 - **ID — Instruction Decode:** Instruction decoding, immediate generation, and two-read/one-write integer register file
@@ -16,6 +16,8 @@ The project builds on a previous project ([single-cycle RV32I processor](https:/
 - **MEM — Memory:** Byte-, halfword-, and word-sized memory operations with sign/zero extension and write masks
 - **WB — Writeback:** Register writeback and in-order architectural retirement through an RVFI-compatible interface
 - **Hazard Unit:** Detects load-use hazards, controls pipeline stalls, and selects EX/MEM or MEM/WB operand forwarding to resolve data dependencies
+
+For further documentation, see ![here](docs/architecture.md).
 
 ### Pipeline control
 
@@ -46,7 +48,7 @@ The core implements the **RV32I unprivileged base instruction set**:
 
 ## Verification
 
-The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**.
+The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**. Further documentation can be found ![here](docs/verification.md).
 
 ### Verification results
 

@@ -17,7 +17,7 @@ This project implements a 32-bit, single-issue, in-order RISC-V processor in Sys
 Pipeline registers seperate each stage, allowing different instructions to occupy each stage concurrently. Under ideal conditions, the processor can maintain (accept and retire) up to one instruction per cycle (IPC) after the pipeline is filled, however, hazards and redirects can introduce bubbles which decreases the IPC. 
 The V1 core supports the **40 RV32I base instructions**. The integer register file contains 32 registers (`x0`—`x31`), each 32 bits wide. `x0` always reads as zero. `FENCE` is recognized as an operation with no additional hardware action in this model. `ECALL` and `EBREAK` are recognized as terminal exceptions rather than serviced by a privileged trap handler.
 
-![Five-stage V1 processor architecture](pipelined-arch-diagram-1-6.svg)
+![Five-stage V1 processor architecture](images/pipelined-arch-diagram-1-6.svg)
 
 | Property | V1 implementation |
 | --- | --- |
