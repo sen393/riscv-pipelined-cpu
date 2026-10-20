@@ -69,10 +69,10 @@ module if_stage
     // --------------------------------------------------------
 
     always_comb begin
-       if_id_d.valid        = 1'b1;
-       if_id_d.pc           = pc;
-       if_id_d.pc_plus4     = pc_plus4;
-       if_id_d.instr        = instr;
+        if_id_d.valid        = 1'b1;
+        if_id_d.pc           = pc;
+        if_id_d.pc_plus4     = pc_plus4;
+        if_id_d.instr        = instr;
     end
 
 
