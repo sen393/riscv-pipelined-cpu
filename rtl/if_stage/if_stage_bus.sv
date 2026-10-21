@@ -162,8 +162,8 @@ module if_stage_bus
                         discard_q   <= 1'b0;
 
                         if (halt_pending_q || stop_fetch || 
-                            (imm.rsp_err && !discard_response)) begin
-                            if (imm.rsp_err && !discard_response)
+                            (imem.rsp_err && !discard_response)) begin
+                            if (imem.rsp_err && !discard_response)
                                 fetch_error <= 1'b1;
                             state_q <= FETCH_HALT;
                         end
@@ -193,3 +193,4 @@ module if_stage_bus
 
 
 endmodule
+
