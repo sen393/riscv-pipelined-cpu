@@ -17,7 +17,7 @@ The project builds on a previous project ([single-cycle RV32I processor](https:/
 - **WB — Writeback:** Register writeback and in-order architectural retirement through an RVFI-compatible interface
 - **Hazard Unit:** Detects load-use hazards, controls pipeline stalls, and selects EX/MEM or MEM/WB operand forwarding to resolve data dependencies
 
-For further documentation, see [here](docs/architecture.md).
+For further documentation, see [architecture](docs/architecture.md).
 
 ### Pipeline control
 
@@ -54,7 +54,8 @@ The processor exposes retirement information via a custom `retire_t` bundle. An 
 
 All **43 generated formal checks** and all four directed simulation regressions passed.
 
-**Formal verification — riscv-formal**
+#### Formal verification — riscv-formal
+
 - **37 RV32I instruction-model checks:** Arithmetic, logical, shift, branch, jump, load, and store instructions
 - **5 architectural consistency checks:**
   - `reg` — Register consistency
@@ -64,7 +65,8 @@ All **43 generated formal checks** and all four directed simulation regressions 
   - `causal_mem` — Memory-dependency causality
 - **1 formal cover check:** `cover`
 
-**Directed simulation — Verilator**
+#### Directed simulation — Verilator
+
 - **Basic regression:** Retirement behavior, illegal instructions, and precise exceptions
 - **Memory regression:** 26 instructions testing store-to-load ordering, overlapping byte/halfword accesses, sign extension, and memory dependencies
 - **Hazard regression:** 48 retired instructions testing operand forwarding, forwarding priority, load-use stalls, branch/jump redirects, and pipeline flushing
