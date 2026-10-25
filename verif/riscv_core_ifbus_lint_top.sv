@@ -11,16 +11,24 @@ module riscv_core_ifbus_lint_top
         .rst (rst)
     );
 
-    retire_t rvfi;
-    logic    fetch_error;
+    mem_bus_if dmem (
+        .clk (clk),
+        .rst (rst)
+    );
+
+    retire_t    rvfi;
+    logic       fetch_error;
+    logic       data_access_fault;
 
     // Instantiate new processor
     riscv_core_ifbus u_core (
-        .clk         (clk),
-        .rst         (rst),
-        .imem        (imem),
-        .rvfi        (rvfi),
-        .fetch_error (fetch_error)
+        .clk                (clk),
+        .rst                (rst),
+        .imem               (imem),
+        .dmem               (dmem),
+        .rvfi               (rvfi),
+        .fetch_error        (fetch_error),
+        .data_access_fault  (data_access_fault)
     );
 
     // Placeholder memory responses for lint only
@@ -29,4 +37,8 @@ module riscv_core_ifbus_lint_top
     assign imem.rsp_rdata = '0;
     assign imem.rsp_err   = 1'b0;
 
+    assign dmem.req_ready = 1'b1;
+    assign dmem.rsp_valid = 1'b0;
+    assign dmem.rsp_rdata = '0;
+    assign dmem.rsp_err   = 1'b0;
 endmodule

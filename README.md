@@ -17,7 +17,7 @@ The project builds on a previous project ([single-cycle RV32I processor](https:/
 - **WB — Writeback:** Register writeback and in-order architectural retirement through an RVFI-compatible interface
 - **Hazard Unit:** Detects load-use hazards, controls pipeline stalls, and selects EX/MEM or MEM/WB operand forwarding to resolve data dependencies
 
-For further documentation, see ![here](docs/architecture.md).
+For further documentation, see [here](docs/architecture.md).
 
 ### Pipeline control
 
@@ -48,14 +48,14 @@ The core implements the **RV32I unprivileged base instruction set**:
 
 ## Verification
 
-The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**. Further documentation can be found ![here](docs/verification.md).
+The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**. Further documentation can be found [here](docs/verification.md).
 
 ### Verification results
 
 All **43 generated formal checks** and all four directed simulation regressions passed.
 
 **Formal verification — riscv-formal**
-- **37 RV32I instruction-model checks:** Arithmetic, logical, shift, branch, jump, load, and store instructions.
+- **37 RV32I instruction-model checks:** Arithmetic, logical, shift, branch, jump, load, and store instructions
 - **5 architectural consistency checks:**
   - `reg` — Register consistency
   - `pc_fwd` — Program counter progression
@@ -65,10 +65,10 @@ All **43 generated formal checks** and all four directed simulation regressions 
 - **1 formal cover check:** `cover`
 
 **Directed simulation — Verilator**
-- **Basic regression:** Retirement behavior, illegal instructions, and precise exceptions.
-- **Memory regression:** 26 instructions testing store-to-load ordering, overlapping byte/halfword accesses, sign extension, and memory dependencies.
-- **Hazard regression:** 48 retired instructions testing operand forwarding, forwarding priority, load-use stalls, branch/jump redirects, and pipeline flushing.
-- **System regression:** 14 scenarios covering `FENCE`, `ECALL`, `EBREAK`, illegal encodings, misaligned accesses, and precise exception side-effect suppression.
+- **Basic regression:** Retirement behavior, illegal instructions, and precise exceptions
+- **Memory regression:** 26 instructions testing store-to-load ordering, overlapping byte/halfword accesses, sign extension, and memory dependencies
+- **Hazard regression:** 48 retired instructions testing operand forwarding, forwarding priority, load-use stalls, branch/jump redirects, and pipeline flushing
+- **System regression:** 14 scenarios covering `FENCE`, `ECALL`, `EBREAK`, illegal encodings, misaligned accesses, and precise exception side-effect suppression
 
 All four simulation regressions also pass through the combined `make test-all` target.
 

@@ -15,7 +15,7 @@ module if_stage_bus
     input   logic [XLEN-1:0]    redirect_pc,
 
     // Instruction memory interface
-    mem_bus_if.master         imem,
+    mem_bus_if.master           imem,
 
     // Output to IF/ID pipeline register
     output  if_id_t             if_id_d,
@@ -24,7 +24,7 @@ module if_stage_bus
 );
 
     // --------------------------------------------------------
-    // Fetch state machine
+    // Fetch FSM states
     // --------------------------------------------------------
 
     typedef enum logic [1:0] {
@@ -103,7 +103,7 @@ module if_stage_bus
 
 
     // --------------------------------------------------------
-    // Fetch control and PC tracking
+    // Fetch transaction FSM
     // --------------------------------------------------------
 
     always_ff @(posedge clk) begin
