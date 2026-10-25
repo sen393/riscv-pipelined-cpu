@@ -48,7 +48,7 @@ The core implements the **RV32I unprivileged base instruction set**:
 
 ## Verification
 
-The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**. Further documentation can be found [here](docs/verification.md).
+The processor exposes retirement information via a custom `retire_t` bundle. An **RVFI adapter** maps that bundle to the standard interface used by [riscv-formal](https://github.com/YosysHQ/riscv-formal). Formal checks run using **SymbiYosys, Yosys/Slang, and Boolector**; simulation and linting use **Verilator**. Further documentation can be found in [verification](docs/verification.md).
 
 ### Verification results
 
