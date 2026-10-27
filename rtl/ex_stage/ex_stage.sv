@@ -41,6 +41,15 @@ module ex_stage
 
 
     // --------------------------------------------------------
+    // Data address alignment calculation
+    // --------------------------------------------------------
+
+    logic [1:0] data_addr_low;
+
+    assign data_addr_low = rs1_fwd[1:0] + id_ex_q.imm[1:0];
+
+
+    // --------------------------------------------------------
     // Input data forwarding selection
     // --------------------------------------------------------
 
@@ -150,17 +159,16 @@ module ex_stage
 
         if (id_ex_q.valid &&
             (id_ex_q.ctrl.mem_read || id_ex_q.ctrl.mem_write)) begin
-            
+
             case (id_ex_q.ctrl.mem_size)
-                MEM_BYTE    : data_addr_misaligned = 1'b0;
-                MEM_HALF    : data_addr_misaligned = alu_result[0];
-                MEM_WORD    : data_addr_misaligned = |alu_result[1:0];
-                default     : data_addr_misaligned = 1'b0;
+                MEM_BYTE : data_addr_misaligned = 1'b0;
+                MEM_HALF : data_addr_misaligned = data_addr_low[0];
+                MEM_WORD : data_addr_misaligned = |data_addr_low;
+                default  : data_addr_misaligned = 1'b0;
             endcase
 
         end
     end
-
 
 
     // --------------------------------------------------------

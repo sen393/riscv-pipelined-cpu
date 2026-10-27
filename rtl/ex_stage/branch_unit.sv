@@ -11,6 +11,42 @@ module branch_unit
     output  addr_t      redirect_pc
 );
 
+    // --------------------------------------------------------
+    // Parallel branch comparisons
+    // --------------------------------------------------------
+
+    logic [3:0] byte_eq;
+    logic [3:0] byte_lt;
+
+    logic rs_eq;
+    logic rs_lt_unsigned;
+    logic rs_lt_signed;
+
+    // Four parallel 8-bit comparisons
+    for (genvar i = 0; i < 4; i++) begin : gen_compare
+        assign byte_eq[i] =
+            rs1_data[i*8 +: 8] == rs2_data[i*8 +: 8];
+
+        assign byte_lt[i] =
+            rs1_data[i*8 +: 8] < rs2_data[i*8 +: 8];
+    end
+
+    // Full equality comparison
+    assign rs_eq = &byte_eq;
+
+    // Unsigned comparison: most significant byte has priority
+    assign rs_lt_unsigned =
+        byte_lt[3] ||
+        (byte_eq[3] && byte_lt[2]) ||
+        (byte_eq[3] && byte_eq[2] && byte_lt[1]) ||
+        (byte_eq[3] && byte_eq[2] && byte_eq[1] && byte_lt[0]);
+
+    // Signed comparison
+    assign rs_lt_signed =
+        (rs1_data[31] != rs2_data[31])
+            ? rs1_data[31]
+            : rs_lt_unsigned;
+
     always_comb begin
         // Set defaults
         redirect_valid  = '0;
@@ -23,34 +59,34 @@ module branch_unit
                 redirect_pc     = '0;
             end
 
-            CF_BEQ      : begin
-                redirect_valid  = (rs1_data == rs2_data);
-                redirect_pc     = (pc + imm);
+            CF_BEQ: begin
+                redirect_valid = rs_eq;
+                redirect_pc    = pc + imm;
             end
 
-            CF_BNE      : begin
-                redirect_valid  = (rs1_data != rs2_data);
-                redirect_pc     = (pc + imm);
+            CF_BNE: begin
+                redirect_valid = !rs_eq;
+                redirect_pc    = pc + imm;
             end
 
-            CF_BLT      : begin
-                redirect_valid  = ($signed(rs1_data) <  $signed(rs2_data));
-                redirect_pc     = (pc + imm);
+            CF_BLT: begin
+                redirect_valid = rs_lt_signed;
+                redirect_pc    = pc + imm;
             end
 
-            CF_BGE      : begin
-                redirect_valid  = ($signed(rs1_data) >= $signed(rs2_data));
-                redirect_pc     = (pc + imm);
+            CF_BGE: begin
+                redirect_valid = !rs_lt_signed;
+                redirect_pc    = pc + imm;
             end
 
-            CF_BLTU     : begin
-                redirect_valid  = (rs1_data <  rs2_data);
-                redirect_pc     = (pc + imm);
+            CF_BLTU: begin
+                redirect_valid = rs_lt_unsigned;
+                redirect_pc    = pc + imm;
             end
 
-            CF_BGEU     : begin
-                redirect_valid  = (rs1_data >= rs2_data);
-                redirect_pc     = (pc + imm);
+            CF_BGEU: begin
+                redirect_valid = !rs_lt_unsigned;
+                redirect_pc    = pc + imm;
             end
 
             CF_JAL      : begin

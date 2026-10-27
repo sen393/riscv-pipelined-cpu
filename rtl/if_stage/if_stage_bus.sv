@@ -51,6 +51,19 @@ module if_stage_bus
     logic   rsp_fire;
     logic   discard_response;
 
+    addr_t  next_pc_plus4;
+    addr_t  redirect_pc_plus4;
+
+    assign next_pc_plus4     = next_pc_q + 32'd4;
+    assign redirect_pc_plus4 = redirect_pc + 32'd4;
+
+    logic rsp_pc_advance;
+
+    assign rsp_pc_advance =
+        (state_q == FETCH_RSP) &&
+        imem.rsp_valid &&
+        (decode_ready || discard_q || redirect_valid);
+
 
     // --------------------------------------------------------
     // Instruction request channel
@@ -130,19 +143,20 @@ module if_stage_bus
                 // Send instruction fetch
                 // --------------------------------------------
                 FETCH_IDLE: begin
-                    if (stop_fetch || halt_pending_q) begin
-                        state_q <= FETCH_HALT;
-                    end
-                    else begin
-                        state_q <= FETCH_REQ;
 
-                        // Redirect directly if no request is pending
-                        if (redirect_valid) begin
-                            req_pc_q  <= redirect_pc;
-                            next_pc_q <= redirect_pc + 32'd4;
-                        end
+                    // Redirect PC bookkeeping independently of halt control
+                    if (redirect_valid) begin
+                        req_pc_q  <= redirect_pc;
+                        next_pc_q <= redirect_pc_plus4;
                     end
+
+                    // Decide whether another fetch can begin
+                    if (stop_fetch || halt_pending_q)
+                        state_q <= FETCH_HALT;
+                    else
+                        state_q <= FETCH_REQ;
                 end
+
                 FETCH_REQ: begin
                     if (redirect_valid)
                         discard_q   <= 1'b1;
@@ -155,22 +169,30 @@ module if_stage_bus
                 // Wait for instruction response
                 // --------------------------------------------
                 FETCH_RSP: begin
-                    if (redirect_valid)
-                        discard_q   <= 1'b1;
-                    
-                    if (rsp_fire) begin
-                        discard_q   <= 1'b0;
 
-                        if (halt_pending_q || stop_fetch || 
+                    if (redirect_valid)
+                        discard_q <= 1'b1;
+
+                    // PC bookkeeping does not depend on terminal halt control
+                    if (rsp_pc_advance) begin
+                        req_pc_q  <= redirect_valid ? redirect_pc : next_pc_q;
+                        next_pc_q <= redirect_valid ? redirect_pc_plus4 : next_pc_plus4;
+                    end
+
+                    // Response consumption and halt behavior remain unchanged
+                    if (rsp_fire) begin
+                        discard_q <= 1'b0;
+
+                        if (halt_pending_q || stop_fetch ||
                             (imem.rsp_err && !discard_response)) begin
+
                             if (imem.rsp_err && !discard_response)
                                 fetch_error <= 1'b1;
+
                             state_q <= FETCH_HALT;
                         end
                         else begin
-                            state_q     <= FETCH_IDLE;
-                            req_pc_q    <= (redirect_valid) ? redirect_pc : next_pc_q;
-                            next_pc_q   <= ((redirect_valid) ? redirect_pc : next_pc_q) + 32'd4;
+                            state_q <= FETCH_IDLE;
                         end
                     end
                 end
