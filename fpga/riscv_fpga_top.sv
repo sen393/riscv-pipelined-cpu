@@ -5,7 +5,7 @@ module riscv_fpga_top
     input  logic       rst,
 
     output logic [7:0] debug_data,
-    output logic       retire_valid,
+    output logic       test_done,
     output logic       fetch_error,
     output logic       data_access_fault
 );
@@ -40,13 +40,57 @@ module riscv_fpga_top
     end
     
     assign cpu_rst = reset_sync_q[1];
+    // Observe processor retirement
+
+
+    // --------------------------------------------------------
+    // FPGA smoke-test result capture
+    // --------------------------------------------------------
+
+    retire_t rvfi;
+    logic [7:0] result_q;
+
+    logic core_fetch_error;
+    logic core_data_access_fault;
+
+    // Capture the result when LW x3, 0(x0) retires
+    logic smoke_result_valid;
+
+    assign smoke_result_valid =
+        rvfi.valid &&
+        !rvfi.trap &&
+        (rvfi.pc_rdata == 32'h0000_000C) &&
+        (rvfi.insn == 32'h0000_2183) &&
+        (rvfi.rd_addr == 5'd3);
+
+    always_ff @(posedge cpu_clk) begin
+        if (cpu_rst) begin
+            result_q          <= '0;
+            test_done         <= 1'b0;
+            fetch_error       <= 1'b0;
+            data_access_fault <= 1'b0;
+        end
+        else begin
+            if (smoke_result_valid) begin
+                result_q  <= rvfi.rd_wdata[7:0];
+                test_done <= 1'b1;
+            end
+
+            // Sticky error indicators
+            if (core_fetch_error)
+                fetch_error <= 1'b1;
+
+            if (core_data_access_fault)
+                data_access_fault <= 1'b1;
+        end
+    end
+
+    assign debug_data = result_q;
 
 
     // --------------------------------------------------------
     // System init
     // --------------------------------------------------------
-
-    retire_t rvfi;
 
     riscv_system #(
         .IMEM_INIT_FILE ("bram_smoke.mem")
@@ -54,12 +98,8 @@ module riscv_fpga_top
         .clk                (cpu_clk),
         .rst                (cpu_rst),
         .rvfi               (rvfi),
-        .fetch_error        (fetch_error),
-        .data_access_fault  (data_access_fault)
+        .fetch_error        (core_fetch_error),
+        .data_access_fault  (core_data_access_fault)
     );
-
-    // Observe processor retirement
-    assign retire_valid = rvfi.valid;
-    assign debug_data   = rvfi.rd_wdata[7:0];
 
 endmodule

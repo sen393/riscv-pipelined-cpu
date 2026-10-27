@@ -1,4 +1,4 @@
-module riscv_core_ifbus
+module riscv_core
     import riscv_pkg::*;
 #(
     parameter   logic [XLEN-1:0]        RESET_PC = '0
@@ -227,7 +227,7 @@ module riscv_core_ifbus
     // Instantiate IF
     // --------------------------------------------------------
 
-    if_stage_bus #(
+    if_stage #(
         .RESET_PC           (RESET_PC)
     ) u_if_stage (
         .clk                (clk),
@@ -345,7 +345,7 @@ module riscv_core_ifbus
     // Instantiate MEM
     // --------------------------------------------------------
 
-    mem_stage_bus u_mem_stage
+    mem_stage u_mem_stage
     (
         .clk                (clk),        
         .rst                (rst),

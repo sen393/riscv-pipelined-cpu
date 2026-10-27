@@ -1,4 +1,4 @@
-module if_stage_bus
+module if_stage
     import riscv_pkg::*;
 #(
     parameter logic [XLEN-1:0] RESET_PC = '0

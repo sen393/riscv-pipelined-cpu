@@ -1,188 +1,211 @@
-# Processor Architecture — V1
+# Processor Architecture — v2.0
 
-> **Purpose:** Document the V1 core as released in its current state, before FPGA/SoC integration
+> **Purpose:** Describe the implemented five-stage RV32I processor, bus-connected memory system, and Real Digital Urbana FPGA integration at the v2.0 milestone.
 >
-> **Primary RTL:** [`riscv_core.sv`](../rtl/riscv_core.sv) and [`riscv_pkg.sv`](../rtl/riscv_pkg.sv)
+> **Primary RTL:** [`riscv_core.sv`](../rtl/riscv_core.sv), [`riscv_system.sv`](../rtl/riscv_system.sv), [`riscv_fpga_top.sv`](../fpga/riscv_fpga_top.sv), and [`riscv_pkg.sv`](../rtl/riscv_pkg.sv).
 
 ## 1. Overview
 
-This project implements a 32-bit, single-issue, in-order RISC-V processor in SystemVerilog using a five-stage pipeline:
+The processor is a **32-bit, single-issue, in-order RV32I implementation** written in SystemVerilog. It retains the five-stage datapath established in v1.0 while adding request/response memory interfaces, synchronous FPGA block RAM, memory-backpressure handling, and a timing-closed hardware implementation.
 
-1. **IF — Instruction Fetch:** Fetch the current instruction and determine the next program count
-2. **ID — Instruction Decode:** Decode the instruction, generate control signals and immediate values, and read source registers
-3. **EX — Execute:** Execute ALU operations, calculate memory addresses, resolve branches/jumps, and detect misaligned instruction/ data accesses
-4. **MEM — Memory:** Perform loads and stores, including subword access load extension
-5. **WB — Writeback:** Write results to the register file and report architectural retirement
+1. **IF — Instruction Fetch:** Request instructions through the instruction bus, handle responses and redirects, and discard wrong-path responses.
+2. **ID — Instruction Decode:** Decode instructions, generate immediates and control signals, and read the integer register file.
+3. **EX — Execute:** Select forwarded operands, perform ALU operations, resolve branches/jumps, calculate addresses, and detect misalignment.
+4. **MEM — Memory:** Issue data-bus requests, wait for responses, and perform byte/halfword/word load and store handling.
+5. **WB — Writeback:** Commit register results and produce in-order architectural retirement records.
 
-Pipeline registers seperate each stage, allowing different instructions to occupy each stage concurrently. Under ideal conditions, the processor can maintain (accept and retire) up to one instruction per cycle (IPC) after the pipeline is filled, however, hazards and redirects can introduce bubbles which decreases the IPC. 
-The V1 core supports the **40 RV32I base instructions**. The integer register file contains 32 registers (`x0`—`x31`), each 32 bits wide. `x0` always reads as zero. `FENCE` is recognized as an operation with no additional hardware action in this model. `ECALL` and `EBREAK` are recognized as terminal exceptions rather than serviced by a privileged trap handler.
+![Five-stage processor datapath](images/pipelined-arch-diagram-1-6.svg)
 
-![Five-stage V1 processor architecture](images/pipelined-arch-diagram-1-6.svg)
+*The diagram illustrates the five-stage datapath and forwarding/redirect paths. It originated with v1.0 and does not depict every v2.0 bus, BRAM, or clocking component.*
 
-| Property | V1 implementation |
+| Property | v2.0 implementation |
 | --- | --- |
-| ISA / data width | RV32I / 32 bits |
-| Issue and retirement | Single-issue, in-order |
-| Pipeline | IF → ID → EX → MEM → WB |
-| Register file | Two combinational read ports; one clocked write port |
-| Control-flow resolution | EX stage |
-| Data hazard handling | EX/MEM and MEM/WB forwarding, load-use stall, WB-to-ID bypass |
-| Instruction memory | Internal asynchronous-read array, 256 × 32 bits by default |
-| Data memory | Internal asynchronous-read / synchronous-write array, 256 × 32 bits by default |
-| Architectural retirement | Custom `retire_t` bundle; adapted to RVFI for formal verification |
+| ISA / datapath | RV32I / 32 bits; 40 implemented base instructions |
+| Execution | Single-issue, in-order, five-stage pipeline |
+| Register file | 32 × 32-bit (`x0` hardwired to zero); two combinational reads, one clocked write |
+| Branch/jump resolution | EX stage; no branch prediction |
+| Data hazards | EX/MEM and MEM/WB forwarding, load-use bubbles, WB-to-ID bypass |
+| Memory interfaces | Separate instruction and data `mem_bus_if` request/response ports |
+| FPGA memory | Separate, synchronous, inferred BRAMs; 1,024 × 32-bit words each by default |
+| Architectural retirement | `retire_t` bundle, adaptable to RVFI for verification |
+| Target hardware | Real Digital Urbana, Spartan-7 XC7S50-CSGA324-1 |
+| FPGA CPU clock | 80 MHz, generated from the board's 100 MHz oscillator |
 
-The memories are parameterized by depth, but the core selects a subset of the 32-bit address to index each memory. The core does **not** yet include a complete system address decoder or external memory interface.
+The pipeline can retire **at most one instruction per cycle**. Fetch and data-memory handshakes, load-use hazards, redirects, and exceptions reduce the achieved instruction rate. No sustained IPC claim is made for the v2.0 FPGA implementation.
 
-## 2. Datapath and pipeline stages
+## 2. System hierarchy and memory interfaces
+
+**RTL:** [`riscv_core.sv`](../rtl/riscv_core.sv), [`riscv_system.sv`](../rtl/riscv_system.sv), [`mem_bus_if.sv`](../ip/memory/mem_bus_if.sv), [`bram_adapter.sv`](../ip/memory/bram_adapter.sv), [`bram.sv`](../ip/memory/bram.sv).
+
+The processor datapath is separated from the memory implementation:
+
+```text
+riscv_fpga_top
+├── clk_wiz_0                 100 MHz board clock → 80 MHz CPU clock
+├── reset synchronizer
+└── riscv_system
+    ├── riscv_core      IF → ID → EX → MEM → WB
+    │   ├── instruction bus ─────────────────┐
+    │   └── data bus ─────────────────────┐  │
+    ├── data bram_adapter  <──────────────┘  │
+    │   └── data bram                        │
+    └── instruction bram_adapter <───────────┘
+        └── instruction bram
+```
+
+`riscv_core` is the bus-connected processor. `riscv_system` instantiates it with independent instruction and data BRAM adapters. The instruction side is **read-only**; the data side supports reads and byte-masked writes. The buses do not require a shared-memory arbiter in this configuration.
+
+The `mem_bus_if` interface provides:
+
+| Channel | Signals | Meaning |
+| --- | --- | --- |
+| Request | `req_valid`, `req_ready` | A request is accepted when both are asserted |
+| Request address/control | `req_addr`, `req_write` | Byte address and read/write direction |
+| Write payload | `req_wdata`, `req_wstrb` | Write data and byte enables |
+| Response | `rsp_valid`, `rsp_rdata`, `rsp_err` | Response completion, read data, and error status |
+
+These interfaces allow the core to wait for a memory operation rather than assuming an asynchronous, zero-latency array. The current system uses local BRAM adapters; it does **not** implement caches, an external DRAM controller, or a general peripheral interconnect.
+
+### BRAM and address mapping
+
+The underlying `bram.sv` is a parameterized, single-port, **synchronous-read, read-first** memory with optional initialization from a file. `bram_adapter.sv` translates the request/response bus into BRAM accesses and supplies a registered response. Its `DEPTH_WORDS`, `BASE_ADDR`, `INIT_FILE`, and `READ_ONLY` parameters control the address window and access behavior; out-of-range or disallowed accesses can generate response errors.
+
+The default instruction and data memories are each **1,024 32-bit words (4 KiB)**. Their address windows are independently configured. In the current Harvard-style system, instruction fetches and data accesses use separate physical memories even when their numeric addresses overlap.
+
+This replaces the v1.0 model in which memories were accessed internally through asynchronous-read arrays and only part of the address was used for indexing.
+
+## 3. Datapath and pipeline stages
 
 ### Instruction Fetch (IF)
 
-**RTL:** [`if_stage.sv`](../rtl/if_stage/if_stage.sv), [`pc_reg.sv`](../rtl/if_stage/pc_reg.sv), [`instr_mem.sv`](../rtl/if_stage/instr_mem.sv)
+**RTL:** [`if_stage.sv`](../rtl/if_stage/if_stage.sv).
 
-The program counter (`PC`) holds the byte address of the instruction being fetched. For ordinary sequential execution, the next address is `PC + 4`. A taken branch or jump resolved in EX instead supplies `redirect_pc`.
+The IF stage requests 32-bit instructions through the instruction bus. Its control FSM uses `FETCH_IDLE`, `FETCH_REQ`, `FETCH_RSP`, and `FETCH_HALT` states to manage requests, responses, and terminal fetch conditions. It tracks request and next-PC state (`req_pc_q` and `next_pc_q`) and forms an `if_id_t` bundle containing instruction validity, PC, `PC + 4`, and instruction bits.
 
-The IF stage reads an instruction **combinationally** from its internal instruction memory. It prepares an `if_id_t` bundle containing `valid`, `pc`, `pc_plus4`, and `instr`. The IF/ID pipeline register captures this bundle on the next rising clock edge unless control logic stalls or flushes it.
+A taken branch or jump resolved in EX supplies a redirect address. When an instruction request or response is already in flight, fetch logic marks wrong-path data for discard instead of allowing it to enter the architectural pipeline. `decode_ready` provides backpressure when downstream stages cannot accept another instruction, while `stop_fetch` handles terminal conditions.
 
-The PC register has an enable (`pc_en`) so it can hold its current address during a load-use stall or after terminal exception handling. A valid EX redirect takes priority over an ordinary stall.
+The v2.0 timing improvements include independently computed sequential/redirect `PC + 4` values and PC bookkeeping decoupled from terminal halt control. Unlike v1.0, IF does **not** assume combinational instruction-memory reads.
 
 ### Instruction Decode (ID)
 
-**RTL:** [`id_stage.sv`](../rtl/id_stage/id_stage.sv), [`decoder.sv`](../rtl/id_stage/decoder.sv), [`imm_gen.sv`](../rtl/id_stage/imm_gen.sv), [`reg_file.sv`](../rtl/id_stage/reg_file.sv)
+**RTL:** [`id_stage.sv`](../rtl/id_stage/id_stage.sv), [`decoder.sv`](../rtl/id_stage/decoder.sv), [`imm_gen.sv`](../rtl/id_stage/imm_gen.sv), [`reg_file.sv`](../rtl/id_stage/reg_file.sv).
 
-The ID stage extracts the instruction's register fields (`rs1`, `rs2`, `rd`), decodes its opcode and function fields, and generates the appropriate immediate. The decoder produces a packed `ctrl_t` bundle specifying operations such as the ALU function, operand selections, memory read/write control, result selection, branch type, and exception category.
+ID extracts `rs1`, `rs2`, and `rd`, decodes the instruction, computes the immediate, and builds a `ctrl_t` control bundle for downstream stages. The register file has two combinational read ports and a synchronous write port. Writes to `x0` are ignored, and reads of `x0` return zero.
 
-The integer register file has two **combinational reads** and one **synchronous write**. To handle a register being read in ID while an older instruction writes it in WB, the register file bypasses the writeback data to a matching read port in the same cycle. Writes to `x0` are ignored, and reads from `x0` always return zero.
-
-ID prepares the `id_ex_t` bundle with decoded controls, register operands, immediate, PC, and instruction information. It also carries source-register metadata used later by the retirement interface.
+A WB-to-ID bypass returns newly written data to a matching decode-stage read in the same cycle. The resulting `id_ex_t` bundle carries the operands, controls, PC, instruction, and metadata used by later retirement reporting.
 
 ### Execute (EX)
 
-**RTL:** [`ex_stage.sv`](../rtl/ex_stage/ex_stage.sv), [`alu.sv`](../rtl/ex_stage/alu.sv), [`branch_unit.sv`](../rtl/ex_stage/branch_unit.sv)
+**RTL:** [`ex_stage.sv`](../rtl/ex_stage/ex_stage.sv), [`alu.sv`](../rtl/ex_stage/alu.sv), [`branch_unit.sv`](../rtl/ex_stage/branch_unit.sv).
 
-The EX stage chooses the latest correct operand values using forwarding selections from the hazard unit. Operand multiplexers then supply either registers, the PC, zero, or an immediate to the ALU, depending on the instruction.
+EX selects source operands from ID/EX, EX/MEM forwarding, or MEM/WB forwarding. It performs arithmetic, logical operations, shifts, comparisons, effective-address generation, and branch/jump resolution. The JALR target clears bit 0 before instruction-address alignment is checked.
 
-The ALU handles arithmetic, logical operations, shifts, comparisons, and address calculations. A separate branch unit compares the forwarded source operands and computes taken branch and jump targets. In particular, the JALR target clears bit 0.
+Branches are compared in EX using the forwarded source values. The branch logic includes parallel subword comparison logic for timing, but the branch outcome still feeds the same-cycle redirect/flush path. Address-alignment checking uses the low address bits computed from the forwarded base register plus immediate, without waiting for the full ALU result.
 
-If a branch or jump is taken, EX requests a PC redirect and invalidates younger instructions. EX also checks **taken control-flow targets** for 4-byte alignment and checks load/store addresses for their required access alignment. Misaligned instructions are marked as exceptions, and their register or memory side effects are disabled.
-
-The `ex_mem_t` bundle carries the ALU result, forwarded store data, destination register, remaining control signals, and retirement metadata to MEM.
+EX marks misaligned taken control-flow targets and misaligned halfword/word data accesses as exceptions and disables the faulting instruction's register/memory side effects. Its `ex_mem_t` bundle carries the result, forwarded store data, controls, and retirement metadata.
 
 ### Memory (MEM)
 
-**RTL:** [`mem_stage.sv`](../rtl/mem_stage/mem_stage.sv), [`data_mem.sv`](../rtl/mem_stage/data_mem.sv)
+**RTL:** [`mem_stage.sv`](../rtl/mem_stage/mem_stage.sv).
 
-The MEM stage performs the five load instructions (`LB`, `LBU`, `LH`, `LHU`, `LW`) and three store instructions (`SB`, `SH`, `SW`). The internal data memory consists of 32-bit words, with a **combinational read** and **clocked write**. The effective address determines the target word and the byte or halfword lane within it.
+MEM executes `LB`, `LBU`, `LH`, `LHU`, `LW`, `SB`, `SH`, and `SW` through the **data request/response bus**, rather than an internal asynchronous memory array.
 
-For loads, MEM selects the required byte, halfword, or word and applies sign extension or zero extension as specified by the instruction. For stores, the data-memory module updates only the selected portion of the word. A valid instruction and the decoded memory-write control are required for a write to occur.
+A controller with `MEM_IDLE`, `MEM_REQ`, `MEM_RSP`, and `MEM_ERROR` states presents memory requests, waits for acceptance and response, and reports access faults. `mem_stall` prevents the pipeline from advancing while a transaction is unfinished. Byte strobes select store lanes; returned load data is extracted and sign- or zero-extended according to the instruction.
 
-The stage also records aligned memory addresses, byte masks, read data, and write data as metadata for verification. It prepares `mem_wb_t` for the final stage.
+The stage carries the aligned memory address, read/write masks, data, and controls needed for retirement reporting. The BRAM adapter supplies the synchronous-memory latency transparently through the response handshake.
 
 ### Writeback (WB)
 
-**RTL:** [`wb_stage.sv`](../rtl/wb_stage/wb_stage.sv)
+**RTL:** [`wb_stage.sv`](../rtl/wb_stage/wb_stage.sv).
 
-WB chooses the architectural destination value from three possibilities:
+WB selects the architectural register result from the **ALU result**, **loaded data**, or **`PC + 4`** for jumps. Only valid, non-trapping instructions requesting a register write may modify a nonzero destination register. In-order retirement metadata is exported through `retire_t`, including instruction, PC transition, source/destination values, memory activity, trap state, and a 64-bit retirement order.
 
-- **ALU result** for arithmetic, logic, address-based results, and upper-immediate instructions.
-- **Loaded memory data** for a load instruction.
-- **`PC + 4`** for the destination register of `JAL` and `JALR`.
+## 4. Pipeline registers, stalls, and hazards
 
-Register writes are enabled only for valid, non-trapping instructions whose decoder requests a write and whose destination is not `x0`. The stage also generates the `retire_t` record with the instruction, operand/destination information, PC transition, memory activity, and trap state. A 64-bit counter records retirement order.
+The four inter-stage bundles are defined in `riscv_pkg.sv`:
 
-## 3. Pipeline registers and instruction flow
-
-The four registered stage boundaries are:
-
-| Register | Type in `riscv_pkg.sv` | Main contents |
+| Boundary | Bundle | Main contents |
 | --- | --- | --- |
-| IF/ID | `if_id_t` | Valid bit, PC, `PC + 4`, instruction |
-| ID/EX | `id_ex_t` | Decode controls, source/destination registers, operand data, immediate, metadata |
-| EX/MEM | `ex_mem_t` | ALU result, forwarded store data, controls, metadata |
-| MEM/WB | `mem_wb_t` | ALU/load results, writeback controls, metadata |
+| IF/ID | `if_id_t` | Validity, PC, `PC + 4`, instruction |
+| ID/EX | `id_ex_t` | Decode controls, register addresses/data, immediate, metadata |
+| EX/MEM | `ex_mem_t` | ALU result, store data, controls, metadata |
+| MEM/WB | `mem_wb_t` | Results, writeback controls, retirement metadata |
 
-For independent instructions with no stalls or redirects, stage occupancy overlaps:
+Every stage carries a validity indication. A **flush** invalidates younger instructions by inserting bubbles, whereas a **hold** preserves state until work can proceed.
 
-| Instruction | Cycle 1 | Cycle 2 | Cycle 3 | Cycle 4 | Cycle 5 | Cycle 6 | Cycle 7 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| I1 | IF | ID | EX | MEM | WB | | |
-| I2 | | IF | ID | EX | MEM | WB | |
-| I3 | | | IF | ID | EX | MEM | WB |
+**RTL:** [`hazard_unit.sv`](../rtl/hazard_unit.sv), [`id_ex_reg.sv`](../rtl/pipeline/id_ex_reg.sv), [`riscv_core.sv`](../rtl/riscv_core.sv).
 
-Each bundle includes a **`valid` bit**. When a stage is flushed, its pipeline register is cleared and the stage contains a *bubble* rather than a real instruction. A **stall/hold** preserves the existing instruction so it can be processed later. Correct use of valid bits ensures that flushed instructions cannot write registers, modify memory, or appear as retired instructions.
+### Forwarding and load-use hazards
 
-In V1, IF/ID supports both holding and flushing, ID/EX supports flushing, and EX/MEM and MEM/WB normally advance every cycle. This assumes memory reads are available combinationally. V2 will need to extend the hold/advance controls for memory requests that take multiple cycles.
+The hazard unit compares source registers in EX against destination registers in EX/MEM and MEM/WB. It prioritizes **EX/MEM** (newer producer) over **MEM/WB** (older producer). EX/MEM loads cannot forward their unavailable read result; loads instead become forwarding candidates when their result reaches writeback.
 
-## 4. Hazard handling
+For a load-use dependency, the consumer is held while a bubble is inserted so the load can proceed. The WB-to-ID register-file bypass also covers same-cycle decode/read and writeback dependencies.
 
-**RTL:** [`hazard_unit.sv`](../rtl/hazard_unit.sv), [`riscv_core.sv`](../rtl/riscv_core.sv)
+### Variable-latency memory stalls
 
-### Data forwarding
+A data-memory transaction may remain pending across multiple clock cycles. `mem_stall` freezes the necessary pipeline state rather than allowing a dependent instruction to advance with missing data. The ID/EX register includes **WB snooping while held**: if an older instruction writes a source register during a hold, the saved source operand is refreshed to prevent using a stale value when execution resumes.
 
-Read-after-write (RAW) hazards occur when an instruction needs a register value that an older instruction has not yet written into the register file. To avoid unnecessary stalls, EX can select a result from an older instruction in **EX/MEM** or **MEM/WB** instead of using the operand captured in ID/EX.
+Memory stalls are distinct from load-use bubbles: a load-use bubble resolves a data dependency, while a memory stall waits for an outstanding transaction. Redirect and flush behavior is coordinated with these holds to preserve instruction ordering.
 
-When both forwarding sources match the same register, **EX/MEM is preferred**, because it represents the newer producer. A load cannot forward from EX/MEM: the loaded value is not available until the MEM stage. MEM/WB forwarding uses the selected WB result, including load data.
+## 5. Control-flow, redirects, and exceptions
 
-### Load-use stall
+Branches and jumps are resolved in EX, so a taken transfer must redirect fetch and discard younger wrong-path instructions. The top-level core coordinates `redirect_fire`, `if_id_flush`, `id_ex_flush`, `if_id_en`, `id_ex_en`, and memory-stall handling. A pending memory response can be discarded if it belongs to the wrong path.
 
-A load-use hazard exists when the instruction in EX is a load and the instruction in ID needs its destination register. The hazard unit checks source-use flags, valid bits, matching register indices, and whether the load writes a nonzero destination register.
+This design has **no branch predictor**. The EX-to-fetch redirect path—including forwarding, branch comparison, and flush control—was identified as the principal timing-critical path during v2.0 FPGA implementation. Several local combinational optimizations were retained, while a larger pipeline redesign was deferred to v3.
 
-For this case, the processor:
-
-1. Holds the PC and IF/ID register for one cycle.
-2. Flushes ID/EX to insert a bubble.
-3. Allows the older load to move ahead.
-4. Subsequently forwards the loaded result to the consumer in EX.
-
-### WB-to-ID bypass
-
-The register file also bypasses WB data to an ID-stage read when source and destination addresses match in the same cycle. This closes a dependency that could otherwise expose a stale value at the decode-stage read ports.
-
-## 5. Control-flow redirects and pipeline flushes
-
-Branches and jumps are resolved in **EX**. A taken branch or jump chooses a new `redirect_pc` instead of sequential `PC + 4`. Because younger instructions may already occupy IF and ID, the core flushes **IF/ID and ID/EX** on a redirect.
-
-The control signals are derived in `riscv_core.sv`:
-
-| Signal | V1 behavior |
-| --- | --- |
-| `pc_en` | Allows PC update on redirect; otherwise blocks on load-use stall or terminal exception conditions |
-| `if_id_flush` | Clears IF/ID on redirect or exception-related control |
-| `if_id_en` | Holds IF/ID on stall unless a flush is required |
-| `id_ex_flush` | Inserts a bubble on stall, redirect, EX exception, or pending terminal exception |
-
-Redirects are given priority over ordinary load-use stalls so wrong-path work cannot prevent the PC from being updated. The V1 pipeline uses **EX-stage branch resolution**, not branch prediction.
-
-## 6. Exceptions and retirement
-
-**RTL:** [`decoder.sv`](../rtl/id_stage/decoder.sv), [`ex_stage.sv`](../rtl/ex_stage/ex_stage.sv), [`riscv_core.sv`](../rtl/riscv_core.sv), [`wb_stage.sv`](../rtl/wb_stage/wb_stage.sv)
-
-The V1 exception model recognizes:
+The simplified exception model recognizes:
 
 - `ECALL` and `EBREAK`.
 - Illegal or unsupported instruction encodings.
 - Misaligned taken instruction targets.
-- Misaligned halfword/word loads and stores.
+- Misaligned halfword and word data accesses.
 
-Decoder-detected exceptions travel with the instruction's control bundle. EX-detected alignment exceptions replace the exception kind and disable the faulting instruction's register and memory writes. The core prevents younger instructions from proceeding while older instructions finish, preserving the intended in-order retirement behavior.
+The pipeline suppresses architectural side effects from faulting instructions and prevents younger wrong-path work from retiring. Accepted terminal exceptions stop further instruction fetching; the retirement record reports `trap`/`halt` as applicable. The core does not implement machine-mode CSRs, an `mtvec` trap handler, interrupts, or `MRET`.
 
-**V1 limitation:** An accepted exception causes fetching to stop until reset. The core does **not** yet implement machine-mode CSR state, `mtvec` trap redirection, interrupt delivery, or a return-from-trap instruction. The retirement record marks an exceptional instruction with `trap`, and this simplified design also sets `halt`.
+The v2.0 bus-based system also exposes **`fetch_error`** and **`data_access_fault`** signals for instruction/data memory failures. These hardware fault outputs should not be confused with a fully implemented privileged exception/interrupt subsystem.
 
-The `retire_t` bundle is exported by `riscv_core`. Verification-specific [`rvfi_adapter.sv`](../verif/rvfi_adapter.sv) and [`rvfi_wrapper.sv`](../verif/rvfi_wrapper.sv) translate it into the RISC-V Formal Interface. These wrappers belong to the verification environment; they are not required as part of the FPGA top-level design.
+## 6. FPGA integration and physical bring-up
 
-## 7. V1 boundaries and upcoming V2 integration
+**RTL:** [`riscv_fpga_top.sv`](../fpga/riscv_fpga_top.sv) and [`riscv_system.sv`](../rtl/riscv_system.sv). **FPGA sources:** [`riscv_fpga.xdc`](../fpga/riscv_fpga.xdc) and [`bram_smoke.mem`](../fpga/programs/bram_smoke.mem).
 
-V1 is an architectural verification milestone, **not yet a standalone FPGA computer**. In particular:
+The Real Digital Urbana supplies a **100 MHz board clock**. The Vivado Clocking Wizard (`clk_wiz_0`) generates an **80 MHz CPU clock** (12.5 ns period). The external clock is constrained to 10 ns; the MMCM-derived CPU clock is constrained automatically as a generated clock.
 
-- Instruction and data memories are instantiated inside the CPU and use asynchronous reads.
-- The internal memories do not fully decode the 32-bit address space; addresses can alias when upper bits are ignored.
-- There are no external instruction/data request-response interfaces or general memory backpressure controls.
-- There is no GPIO, UART, timer, DDR3 controller, or cache in the processor system.
-- Exceptions use a simplified terminal model rather than a privileged software environment.
-- Hardware execution on the Urbana FPGA has not yet been demonstrated by V1.
+Reset is asserted when the user reset input is high or the MMCM is not locked. A two-flip-flop reset synchronizer provides asynchronous assertion and synchronous release into the CPU clock domain. The FPGA wrapper exposes a latched smoke-test result, completion indicator, and sticky fetch/data-access fault indicators on discrete LEDs.
 
-**V2 direction:** Preserve the proven execution datapath where possible, define instruction and data memory interfaces, support variable response latency, integrate synchronous FPGA block RAM, and introduce memory-mapped peripherals. This document should describe *implemented* functionality; update the relevant sections as those changes are verified.
+| FPGA implementation result | v2.0 measurement |
+| --- | --- |
+| Board / FPGA | Urbana / Spartan-7 XC7S50-CSGA324 (-1) |
+| Toolchain | Vivado 2026.1 |
+| CPU clock | **80 MHz** |
+| Post-route worst setup slack | **+0.181 ns** |
+| Post-route worst hold slack | **+0.111 ns** |
+| On-board smoke test | **PASS** |
+
+### Hardware smoke test
+
+The instruction BRAM is initialized from [`fpga/programs/bram_smoke.mem`](../fpga/programs/bram_smoke.mem) with a five-instruction program (followed by NOP padding):
+
+```asm
+addi x1, x0, 42      # x1 = 42
+addi x2, x1, 1       # x2 = 43
+sw   x2, 0(x0)       # data memory word 0 = 43
+lw   x3, 0(x0)       # x3 = 43
+jal  x0, 0           # loop at PC 0x10
+```
+
+The wrapper recognizes retirement of the load at `PC = 0x0C` and latches its 8-bit result. Physical observation confirmed **LEDs 7–0 = `00101011` (`0x2B`, decimal 43)**, **LED 8 = ON** (completion), and **LEDs 9–10 = OFF** (no observed fetch/data fault). BTN0 is connected to the CPU reset input.
+
+This demonstrates basic instruction BRAM fetch, register dependency handling, data BRAM store/load, and architectural retirement on real hardware. It is **not** a full on-board regression of every RV32I instruction or timing behavior.
+
+## 7. Verification scope and limitations
+
+The architectural `retire_t` bundle is connected to the RISC-V Formal Interface by [`rvfi_adapter.sv`](../verif/rvfi_adapter.sv) and [`rvfi_wrapper.sv`](../verif/rvfi_wrapper.sv). The v1.0 core passed **37 bounded RV32I instruction-model checks, five architectural consistency checks, and one cover check**; v1 directed regressions covered memory, hazards, system instructions, and exceptions.
+
+For v2.0, Verilator simulations exercised the bus-connected core, BRAM initialization, memory transactions, and relevant pipeline holds. Vivado confirmed FPGA BRAM inference and 80 MHz timing closure, followed by the physical smoke test above. **The v1 formal results are not a formal proof of the complete v2 memory/FPGA system.**
+
+Current architectural boundaries include local BRAM rather than DDR3, no cache or general MMIO peripheral fabric, a terminal exception model rather than privileged trap handling, and no UART, timer, or video output. Performance-oriented changes to branch handling and additional peripherals are left for v3 development.
 
 ## Related documentation
 
-- [Verification and V1 results](verification.md)
+- [Verification and results](verification.md)
 - [Project README](../README.md)

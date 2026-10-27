@@ -43,7 +43,7 @@ module riscv_system
     // RISC-V Core
     // --------------------------------------------------------
 
-    riscv_core_ifbus #(
+    riscv_core #(
         .RESET_PC (RESET_PC)
     ) u_core (
         .clk                (clk),

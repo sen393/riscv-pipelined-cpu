@@ -1,4 +1,4 @@
-module mem_stage_bus
+module mem_stage
     import riscv_pkg::*;
 (
     input   logic       clk,
