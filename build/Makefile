@@ -1,160 +1,108 @@
 
 # ============================================================
-# RISC-V Pipelined Processor Build Makefile
+# RISC-V Pipelined Processor V2 Build Makefile
 # ============================================================
+
+.DEFAULT_GOAL := lint
 
 VERILATOR := verilator
 
-ROOT := ..
-RTL_DIR := $(ROOT)/rtl
+# ------------------------------------------------------------
+# Directories
+# ------------------------------------------------------------
+
+ROOT      := ..
+RTL_DIR   := $(ROOT)/rtl
+IP_DIR    := $(ROOT)/ip
 VERIF_DIR := $(ROOT)/verif
 
-OBJ_DIR := obj_dir
+# ------------------------------------------------------------
+# RTL sources
+# ------------------------------------------------------------
 
-# Package must be compiled before modules that import it
-PKG := $(RTL_DIR)/riscv_pkg.sv
+# Package and interface definitions must come first
+PKG    := $(RTL_DIR)/riscv_pkg.sv
+BUS_IF := $(IP_DIR)/memory/mem_bus_if.sv
 
-# Find all remaining SystemVerilog RTL sources
-RTL_SRCS := $(PKG) \
-            $(shell find $(RTL_DIR) -name "*.sv" ! -name "riscv_pkg.sv" | sort)
+# Automatically discover remaining RTL and IP sources
+RTL_FILES := $(shell find $(RTL_DIR) -name "*.sv" \
+             ! -name "riscv_pkg.sv" | sort)
 
-# Basic testbench
-TB_TOP := processor_basic_tb
-TB_SRC := $(VERIF_DIR)/$(TB_TOP).sv
-SIM_BIN := $(OBJ_DIR)/V$(TB_TOP)
+IP_FILES := $(shell find $(IP_DIR) -name "*.sv" \
+            ! -name "mem_bus_if.sv" | sort)
 
-# Memory testbench
-MEM_TB_TOP := processor_memory_tb
-MEM_TB_SRC := $(VERIF_DIR)/$(MEM_TB_TOP).sv
-MEM_OBJ_DIR := obj_dir_memory
-MEM_SIM_BIN := $(MEM_OBJ_DIR)/V$(MEM_TB_TOP)
+# Complete source list
+RTL_SRCS := $(PKG) $(BUS_IF) $(RTL_FILES) $(IP_FILES)
 
-# Hazard testbench
-HAZ_TB_TOP := processor_hazard_tb
-HAZ_TB_SRC := $(VERIF_DIR)/$(HAZ_TB_TOP).sv
-HAZ_OBJ_DIR := obj_dir_hazard
-HAZ_SIM_BIN := $(HAZ_OBJ_DIR)/V$(HAZ_TB_TOP)
+# ------------------------------------------------------------
+# Top-level modules
+# ------------------------------------------------------------
 
-# System testbench
-SYS_TB_TOP := processor_system_tb
-SYS_TB_SRC := $(VERIF_DIR)/$(SYS_TB_TOP).sv
-SYS_OBJ_DIR := obj_dir_system
-SYS_SIM_BIN := $(SYS_OBJ_DIR)/V$(SYS_TB_TOP)
+SYSTEM_TOP    := riscv_system
+CORE_LINT_TOP := riscv_core_ifbus_lint_top
+CORE_LINT_SRC := $(VERIF_DIR)/$(CORE_LINT_TOP).sv
 
-SYS_CASES := fence ecall ebreak illegal illegal_system illegal_load illegal_fence_i \
-             lw_misaligned lh_misaligned sw_misaligned sh_misaligned \
-             jal_misaligned jalr_misaligned branch_misaligned
+# BRAM system testbench
+BRAM_TB_TOP  := processor_bram_tb
+BRAM_TB_SRC  := $(VERIF_DIR)/$(BRAM_TB_TOP).sv
+BRAM_OBJ_DIR := obj_dir_bram
+BRAM_SIM_BIN := $(BRAM_OBJ_DIR)/V$(BRAM_TB_TOP)
+
+# ------------------------------------------------------------
+# Verilator flags
+# ------------------------------------------------------------
+
+LINT_FLAGS := \
+    --lint-only \
+    --sv \
+    -Wall \
+    -Wno-fatal
+
+SIM_FLAGS := \
+    --binary \
+    --timing \
+    --sv \
+    -Wall \
+    -Wno-fatal
 
 # ------------------------------------------------------------
 # Lint
 # ------------------------------------------------------------
 
-.PHONY: lint sim test-basic test-memory test-system test-all clean
+.PHONY: lint lint-system lint-core test-bram clean
 
-lint:
-	$(VERILATOR) --lint-only \
-		--sv \
-		-Wall \
-		-Wno-fatal \
-		--top-module riscv_core \
+# Default: Complete processor + BRAM
+lint: lint-system
+
+lint-system:
+	$(VERILATOR) $(LINT_FLAGS) \
+		--top-module $(SYSTEM_TOP) \
 		$(RTL_SRCS)
 
-
-# ------------------------------------------------------------
-# Simulation compilation
-# ------------------------------------------------------------
-
-sim: $(SIM_BIN)
-
-$(SIM_BIN): $(RTL_SRCS) $(TB_SRC) Makefile
-	$(VERILATOR) --binary \
-		--timing \
-		--sv \
-		-Wno-fatal \
-		--top-module $(TB_TOP) \
-		--Mdir $(OBJ_DIR) \
+# Standalone bus-enabled core
+lint-core:
+	$(VERILATOR) $(LINT_FLAGS) \
+		--top-module $(CORE_LINT_TOP) \
 		$(RTL_SRCS) \
-		$(TB_SRC)
-
-
-# ------------------------------------------------------------
-# Basic test
-# ------------------------------------------------------------
-
-test-basic: sim
-	./$(SIM_BIN)
-
+		$(CORE_LINT_SRC)
 
 # ------------------------------------------------------------
-# Memory test
+# BRAM system simulation
 # ------------------------------------------------------------
 
-$(MEM_SIM_BIN): $(RTL_SRCS) $(MEM_TB_SRC) Makefile
-	$(VERILATOR) --binary \
-		--timing \
-		--sv \
-		-Wno-fatal \
-		--top-module $(MEM_TB_TOP) \
-		--Mdir $(MEM_OBJ_DIR) \
+$(BRAM_SIM_BIN): $(RTL_SRCS) $(BRAM_TB_SRC) Makefile
+	$(VERILATOR) $(SIM_FLAGS) \
+		--top-module $(BRAM_TB_TOP) \
+		--Mdir $(BRAM_OBJ_DIR) \
 		$(RTL_SRCS) \
-		$(MEM_TB_SRC)
+		$(BRAM_TB_SRC)
 
-test-memory: $(MEM_SIM_BIN)
-	./$(MEM_SIM_BIN)
-
-
-# ------------------------------------------------------------
-# Hazard test
-# ------------------------------------------------------------
-
-$(HAZ_SIM_BIN): $(RTL_SRCS) $(HAZ_TB_SRC) Makefile
-	$(VERILATOR) --binary \
-		--timing \
-		--sv \
-		-Wno-fatal \
-		--top-module $(HAZ_TB_TOP) \
-		--Mdir $(HAZ_OBJ_DIR) \
-		$(RTL_SRCS) \
-		$(HAZ_TB_SRC)
-
-test-hazard: $(HAZ_SIM_BIN)
-	./$(HAZ_SIM_BIN)
-
-
-# ------------------------------------------------------------
-# System / Exception test
-# ------------------------------------------------------------
-
-$(SYS_SIM_BIN): $(RTL_SRCS) $(SYS_TB_SRC) Makefile
-	$(VERILATOR) --binary \
-		--timing \
-		--sv \
-		-Wno-fatal \
-		--top-module $(SYS_TB_TOP) \
-		--Mdir $(SYS_OBJ_DIR) \
-		$(RTL_SRCS) \
-		$(SYS_TB_SRC)
-
-test-system: $(SYS_SIM_BIN)
-	@set -e; for c in $(SYS_CASES); do \
-		echo "== system case: $$c =="; \
-		./$(SYS_SIM_BIN) +CASE=$$c; \
-	done
-
-
-# ------------------------------------------------------------
-# Full simulation regression
-# ------------------------------------------------------------
-
-test-all: test-basic test-memory test-hazard test-system
-	@echo "========================================"
-	@echo " ALL SIMULATION REGRESSIONS PASSED"
-	@echo "========================================"
-
+test-bram: $(BRAM_SIM_BIN)
+	./$(BRAM_SIM_BIN)
 
 # ------------------------------------------------------------
 # Clean
 # ------------------------------------------------------------
 
 clean:
-	rm -rf $(OBJ_DIR) $(MEM_OBJ_DIR) $(HAZ_OBJ_DIR) $(SYS_OBJ_DIR)
+	rm -rf $(BRAM_OBJ_DIR)

@@ -1,67 +1,102 @@
 module if_stage
     import riscv_pkg::*;
 #(
-    parameter logic [XLEN-1:0]  RESET_PC        = '0,
-    parameter int unsigned      IMEM_DEPTH      = 256,
-    parameter string            IMEM_INIT_FILE  = ""
+    parameter logic [XLEN-1:0] RESET_PC = '0
 )(
     input   logic               clk,
     input   logic               rst,
-    
-    // Pipeline control
-    input   logic               pc_en,
 
+    // Pipeline control
+    input   logic               decode_ready,
+    input   logic               stop_fetch,
+    
     // Control-flow redirect from later stage
     input   logic               redirect_valid,
     input   logic [XLEN-1:0]    redirect_pc,
 
+    // Instruction memory interface
+    mem_bus_if.master           imem,
+
     // Output to IF/ID pipeline register
-    output  if_id_t             if_id_d 
+    output  if_id_t             if_id_d,
+
+    output  logic               fetch_error 
 );
 
-    logic [XLEN-1:0]            pc;
-    logic [XLEN-1:0]            pc_plus4;
-    logic [XLEN-1:0]            next_pc;
-
-    instr_t                     instr;
-
     // --------------------------------------------------------
-    // Next-PC logic
+    // Fetch FSM states
     // --------------------------------------------------------
 
-    assign pc_plus4 = pc + 'd4;
+    typedef enum logic [1:0] {
+        FETCH_IDLE,
+        FETCH_REQ,
+        FETCH_RSP,
+        FETCH_HALT
+    } fetch_state_e;
 
-    assign next_pc  = (redirect_valid)
-                    ? (redirect_pc)
-                    : (pc_plus4);
+    fetch_state_e state_q;
 
 
     // --------------------------------------------------------
-    // Program Counter
+    // Internal regs/signals
     // --------------------------------------------------------
 
-    pc_reg #(
-        .RESET_PC   (RESET_PC)
-    ) u_pc_reg (
-        .clk        (clk),
-        .rst        (rst),
-        .en         (pc_en),
-        .next_pc    (next_pc),
-        .pc         (pc)
-    );
+    addr_t  req_pc_q;   // Current requester pc
+    addr_t  next_pc_q;  // Next pc
+
+    logic   discard_q;  // req belongs to obsolete path
+    logic   halt_pending_q; // Halt requested, drain fetch
+
+    logic   req_fire;
+    logic   rsp_fire;
+    logic   discard_response;
+
+    addr_t  next_pc_plus4;
+    addr_t  redirect_pc_plus4;
+
+    assign next_pc_plus4     = next_pc_q + 32'd4;
+    assign redirect_pc_plus4 = redirect_pc + 32'd4;
+
+    logic rsp_pc_advance;
+
+    assign rsp_pc_advance =
+        (state_q == FETCH_RSP) &&
+        imem.rsp_valid &&
+        (decode_ready || discard_q || redirect_valid);
 
 
     // --------------------------------------------------------
-    // Instruction Memory
+    // Instruction request channel
     // --------------------------------------------------------
 
-    instr_mem #(
-        .DEPTH      (IMEM_DEPTH),
-        .INIT_FILE  (IMEM_INIT_FILE)
-    ) u_instr_mem (
-        .addr       (pc),
-        .instr      (instr)
-    );
+    assign imem.req_valid   = (state_q == FETCH_REQ) && !rst;
+    assign imem.req_addr    = req_pc_q;
+
+    // Instruction memory is read-only
+    assign imem.req_write   = 1'b0;
+    assign imem.req_wdata   = '0;
+    assign imem.req_wstrb   = '0;
+
+    assign req_fire = imem.req_valid && imem.req_ready;
+
+
+    // --------------------------------------------------------
+    // Instruction response channel
+    // --------------------------------------------------------
+
+    assign  discard_response =
+            discard_q       ||
+            halt_pending_q  ||
+            redirect_valid  ||
+            stop_fetch;
+
+    // Accept rsp when decode is ready
+    // Consume discarded or errored rsp
+    assign  imem.rsp_ready   =
+            (state_q == FETCH_RSP) &&
+            (decode_ready || discard_response || imem.rsp_err);
+
+    assign rsp_fire = imem.rsp_valid && imem.rsp_ready;
 
 
     // --------------------------------------------------------
@@ -69,10 +104,113 @@ module if_stage
     // --------------------------------------------------------
 
     always_comb begin
-       if_id_d.valid        = 1'b1;
-       if_id_d.pc           = pc;
-       if_id_d.pc_plus4     = pc_plus4;
-       if_id_d.instr        = instr;
+        if_id_d             = '0; 
+
+        if (rsp_fire && !discard_response && !imem.rsp_err) begin
+            if_id_d.valid       = 1'b1;
+            if_id_d.pc          = req_pc_q;
+            if_id_d.pc_plus4    = req_pc_q + 32'd4;
+            if_id_d.instr       = imem.rsp_rdata;
+        end
+    end
+
+
+    // --------------------------------------------------------
+    // Fetch transaction FSM
+    // --------------------------------------------------------
+
+    always_ff @(posedge clk) begin
+
+        if (rst) begin
+            state_q         <= FETCH_IDLE;
+            req_pc_q        <= RESET_PC;
+            next_pc_q       <= RESET_PC + 32'd4;
+
+            discard_q       <= 1'b0;
+            halt_pending_q  <= 1'b0;
+            fetch_error     <= 1'b0;
+        end
+        else begin
+            if (redirect_valid)
+                next_pc_q   <= redirect_pc;
+
+            if (stop_fetch)
+                halt_pending_q  <= 1'b1;
+            
+            case (state_q)
+
+                // --------------------------------------------
+                // Send instruction fetch
+                // --------------------------------------------
+                FETCH_IDLE: begin
+
+                    // Redirect PC bookkeeping independently of halt control
+                    if (redirect_valid) begin
+                        req_pc_q  <= redirect_pc;
+                        next_pc_q <= redirect_pc_plus4;
+                    end
+
+                    // Decide whether another fetch can begin
+                    if (stop_fetch || halt_pending_q)
+                        state_q <= FETCH_HALT;
+                    else
+                        state_q <= FETCH_REQ;
+                end
+
+                FETCH_REQ: begin
+                    if (redirect_valid)
+                        discard_q   <= 1'b1;
+
+                    if (req_fire)
+                        state_q     <= FETCH_RSP;
+                end
+
+                // --------------------------------------------
+                // Wait for instruction response
+                // --------------------------------------------
+                FETCH_RSP: begin
+
+                    if (redirect_valid)
+                        discard_q <= 1'b1;
+
+                    // PC bookkeeping does not depend on terminal halt control
+                    if (rsp_pc_advance) begin
+                        req_pc_q  <= redirect_valid ? redirect_pc : next_pc_q;
+                        next_pc_q <= redirect_valid ? redirect_pc_plus4 : next_pc_plus4;
+                    end
+
+                    // Response consumption and halt behavior remain unchanged
+                    if (rsp_fire) begin
+                        discard_q <= 1'b0;
+
+                        if (halt_pending_q || stop_fetch ||
+                            (imem.rsp_err && !discard_response)) begin
+
+                            if (imem.rsp_err && !discard_response)
+                                fetch_error <= 1'b1;
+
+                            state_q <= FETCH_HALT;
+                        end
+                        else begin
+                            state_q <= FETCH_IDLE;
+                        end
+                    end
+                end
+
+                // --------------------------------------------
+                // Terminal halt, requires rst to restart
+                // --------------------------------------------
+                FETCH_HALT: begin
+                    // Do nothing
+                end
+
+                default: begin
+                    state_q <= FETCH_HALT;
+                end
+
+            endcase
+        end
+
     end
 
 

@@ -4,6 +4,8 @@ module ex_mem_reg
     input   logic       clk,
     input   logic       rst,
 
+    input   logic       en,
+
     input   ex_mem_t    ex_mem_d,
     output  ex_mem_t    ex_mem_q
 );
@@ -11,7 +13,7 @@ module ex_mem_reg
     always_ff @( posedge clk ) begin
         if (rst) 
             ex_mem_q <= '0;
-        else
+        else if (en)
             ex_mem_q <= ex_mem_d;
     end
 

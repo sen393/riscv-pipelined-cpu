@@ -1,17 +1,40 @@
 module mem_stage
     import riscv_pkg::*;
-#(
-    parameter int unsigned DMEM_DEPTH = 256
-)
 (
     input   logic       clk,
+    input   logic       rst,
 
     // From EX/MEM pipeline reg
     input   ex_mem_t    ex_mem_q,
 
+    // Data memory bus
+    mem_bus_if.master   dmem,
+
     // To MEM/WB pipeline reg
-    output  mem_wb_t    mem_wb_d
+    output  mem_wb_t    mem_wb_d,
+
+    // Pipeline control
+    output  logic       mem_stall,
+    output  logic       access_fault
 );
+
+    // --------------------------------------------------------
+    // Memory FSM states
+    // --------------------------------------------------------
+
+    typedef enum logic [1:0] {
+        MEM_IDLE,
+        MEM_REQ,
+        MEM_RSP,
+        MEM_ERROR
+    } mem_stage_e;
+
+    mem_stage_e state_q;
+
+
+    // --------------------------------------------------------
+    // Internal signals
+    // --------------------------------------------------------
 
     word_t          mem_read_data;
     word_t          load_data;
@@ -20,9 +43,14 @@ module mem_stage
     logic   [15:0]  load_half;
 
     logic           mem_write_en;
-
     logic           mem_read_en;
+    logic           mem_access;
+
     byte_mask_t     mem_mask;
+
+    logic           req_fire;
+    logic           rsp_fire;
+    logic           mem_complete;
 
 
     // --------------------------------------------------------
@@ -31,6 +59,8 @@ module mem_stage
 
     assign mem_write_en = ex_mem_q.valid && ex_mem_q.ctrl.mem_write;
     assign mem_read_en  = ex_mem_q.valid && ex_mem_q.ctrl.mem_read;
+
+    assign mem_access   = mem_write_en || mem_read_en;
 
 
     // --------------------------------------------------------
@@ -50,21 +80,86 @@ module mem_stage
     end
 
 
+    // --------------------------------------------------------
+    // Data memory request
+    // --------------------------------------------------------
+
+    assign dmem.req_valid   = (state_q == MEM_REQ) && !rst;
+    assign dmem.req_addr    = ex_mem_q.alu_result;
+
+    assign dmem.req_write   = mem_write_en;
+
+    // Align store data to desired byte lanes
+    assign dmem.req_wdata   = ex_mem_q.store_data <<
+                            (8 * ex_mem_q.alu_result[1:0]);
+    assign dmem.req_wstrb   = (mem_write_en) ? mem_mask : '0;
+
+    assign req_fire         = dmem.req_valid && dmem.req_ready;
+
 
     // --------------------------------------------------------
-    // Data memory
+    // Data memory response
     // --------------------------------------------------------
 
-    data_mem #(
-        .DEPTH      (DMEM_DEPTH)
-    ) u_data_mem (
-        .clk        (clk),
-        .write_en   (mem_write_en),
-        .mem_size   (ex_mem_q.ctrl.mem_size),
-        .addr       (ex_mem_q.alu_result),
-        .write_data (ex_mem_q.store_data),
-        .read_data  (mem_read_data)
-    );
+    assign dmem.rsp_ready   = (state_q == MEM_RSP) && !rst;
+
+    assign rsp_fire         = dmem.rsp_valid && dmem.rsp_ready;
+
+    assign mem_complete     = (state_q == MEM_RSP) &&
+                              rsp_fire             &&
+                              !dmem.rsp_err;
+
+    assign mem_read_data    = (mem_complete && mem_read_en)
+                            ? dmem.rsp_rdata
+                            : '0;
+
+    // Hold mem instr until it completes
+    // Bus error keeps the pipeline halted
+    assign mem_stall        = (state_q == MEM_ERROR)    ||
+                              (mem_access && !mem_complete);
+
+    assign access_fault     = (state_q == MEM_ERROR)    ||
+                              ((state_q == MEM_RSP)     &&
+                              rsp_fire && dmem.rsp_err);
+
+
+    // --------------------------------------------------------
+    // Memory transaction FSM
+    // --------------------------------------------------------
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            state_q <= MEM_IDLE;
+        end
+        else begin
+            case (state_q)
+                MEM_IDLE    : begin
+                    if (mem_access)
+                        state_q <= MEM_REQ;
+                end
+
+                MEM_REQ     : begin
+                    if (req_fire)
+                        state_q <= MEM_RSP;
+                end
+
+                MEM_RSP     : begin
+                    if (rsp_fire) begin
+                        if (dmem.rsp_err)
+                            state_q <= MEM_ERROR;
+                        else
+                            state_q <= MEM_IDLE;
+                    end
+                end
+
+                MEM_ERROR   : begin
+                    // Do nothing, stuck here until reset
+                end
+
+                default     : state_q <= MEM_ERROR;
+            endcase
+        end
+    end
 
 
     // --------------------------------------------------------
@@ -78,7 +173,7 @@ module mem_stage
             2'b01   : load_byte = mem_read_data[15:8];
             2'b10   : load_byte = mem_read_data[23:16];
             2'b11   : load_byte = mem_read_data[31:24];
-            default : ;
+            default : load_byte = '0;
 
         endcase
     end
@@ -93,7 +188,7 @@ module mem_stage
 
             1'b0    : load_half = mem_read_data[15:0];
             1'b1    : load_half = mem_read_data[31:16];
-            default : ;
+            default : load_half = '0;
 
         endcase
     end
@@ -141,29 +236,30 @@ module mem_stage
     always_comb begin
         // initialize
         mem_wb_d = '0;
+        if (ex_mem_q.valid &&
+            (!mem_access || mem_complete) &&
+            state_q != MEM_ERROR) begin
 
-        mem_wb_d.valid      = ex_mem_q.valid;
+            mem_wb_d.valid      = ex_mem_q.valid;
 
-        mem_wb_d.pc         = ex_mem_q.pc;
-        mem_wb_d.pc_plus4   = ex_mem_q.pc_plus4;
-        mem_wb_d.instr      = ex_mem_q.instr;
+            mem_wb_d.pc         = ex_mem_q.pc;
+            mem_wb_d.pc_plus4   = ex_mem_q.pc_plus4;
+            mem_wb_d.instr      = ex_mem_q.instr;
 
-        mem_wb_d.rd         = ex_mem_q.rd;
+            mem_wb_d.rd         = ex_mem_q.rd;
 
-        mem_wb_d.alu_result = ex_mem_q.alu_result;
-        mem_wb_d.mem_data   = load_data;
+            mem_wb_d.alu_result = ex_mem_q.alu_result;
+            mem_wb_d.mem_data   = load_data;
 
-        mem_wb_d.ctrl       = ex_mem_q.ctrl;
+            mem_wb_d.ctrl       = ex_mem_q.ctrl;
 
-        // ----------------------------------------------------
-        // Retirement Metadata
-        // ----------------------------------------------------
+            // ----------------------------------------------------
+            // Retirement Metadata
+            // ----------------------------------------------------
 
-        if (ex_mem_q.valid) begin
-            // Propagate metadata
             mem_wb_d.meta = ex_mem_q.meta;
 
-            if (mem_read_en || mem_write_en) begin
+            if (mem_access) begin
                 mem_wb_d.meta.mem_addr = {
                     ex_mem_q.alu_result[XLEN-1:2],
                     2'b00
@@ -177,8 +273,7 @@ module mem_stage
 
             if (mem_write_en) begin
                 mem_wb_d.meta.mem_wmask = mem_mask;
-                mem_wb_d.meta.mem_wdata =
-                    ex_mem_q.store_data << (8 * ex_mem_q.alu_result[1:0]);
+                mem_wb_d.meta.mem_wdata = dmem.req_wdata;
             end
         end
     end

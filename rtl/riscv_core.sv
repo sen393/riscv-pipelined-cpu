@@ -1,15 +1,21 @@
 module riscv_core
     import riscv_pkg::*;
 #(
-    parameter   logic [XLEN-1:0]        RESET_PC = '0,
-    parameter   int unsigned            IMEM_DEPTH = 256,
-    parameter   string                  IMEM_INIT_FILE = "",
-    parameter   int unsigned            DMEM_DEPTH = 256
+    parameter   logic [XLEN-1:0]        RESET_PC = '0
 )(
     input   logic       clk,
     input   logic       rst,
 
-    output  retire_t    rvfi
+    // Memory bus interfaces
+    mem_bus_if.master   imem,
+    mem_bus_if.master   dmem,
+
+    // Architectural retirement
+    output  retire_t    rvfi,
+
+    // Terminal memory access errors
+    output  logic       fetch_error,
+    output  logic       data_access_fault
 );
 
     // --------------------------------------------------------
@@ -28,11 +34,22 @@ module riscv_core
     // Pipeline control
     // --------------------------------------------------------
 
-    logic       pc_en;
+    logic       decode_ready;
+    logic       stop_fetch;
+
     logic       if_id_en;
     logic       if_id_flush;
+
+    logic       id_ex_en;
     logic       id_ex_flush;
-    logic       stall;      // From hazard unit
+
+    logic       ex_mem_en;
+
+    logic       load_use_stall; // stall from hazard unit
+    logic       mem_stall;  // stall from waiting for memory
+
+    logic       redirect_fire;
+    logic       ex_exception_fire;
 
 
     // --------------------------------------------------------
@@ -102,9 +119,10 @@ module riscv_core
     assign exception_accept =
         if_id_q.valid                           &&
         (id_ex_d.ctrl.exc_kind != EXC_NONE)     &&
-        !stall                                  &&
-        !redirect_valid                         &&
-        !ex_exception                           &&
+        !load_use_stall                         &&
+        !mem_stall                              &&
+        !redirect_fire                          &&
+        !ex_exception_fire                      &&
         !exception_pending_q;
 
     assign ex_exception =
@@ -114,7 +132,7 @@ module riscv_core
         if (rst)
             // Stuck on HIGH until rst, temporary solution
             exception_pending_q <= 1'b0;
-        else if (exception_accept || ex_exception)
+        else if (exception_accept || ex_exception_fire)
             exception_pending_q <= 1'b1;
     end
 
@@ -133,7 +151,7 @@ module riscv_core
         .fwd_a_sel          (fwd_a_sel),
         .fwd_b_sel          (fwd_b_sel),
 
-        .stall              (stall)
+        .stall              (load_use_stall)
     );
 
 
@@ -141,30 +159,68 @@ module riscv_core
     // Pipeline control
     // --------------------------------------------------------
 
-    // Stop fetching when exception accepted
-    assign pc_en = 
-        redirect_valid |
-       (~stall                      &&
-        ~exception_accept           &&
-        ~ex_exception               &&
-        ~exception_pending_q);
+    assign redirect_fire =
+            redirect_valid      &&
+            !mem_stall          &&
+            !ex_exception       &&
+            !exception_pending_q;
 
-    // Flush younger instructions from IF/ID
+    assign ex_exception_fire =
+            ex_exception    &&
+            !mem_stall      &&
+            !exception_pending_q;
+
+    // Deliver instruction only when not stalled by either cond
+    assign decode_ready = !load_use_stall && !mem_stall;
+
+    // Stop fetch after terminal exceptions/errors
+    assign stop_fetch   =
+            exception_accept        ||
+            ex_exception_fire       ||
+            exception_pending_q     ||
+            data_access_fault;
+
+
+    // --------------------------------------------------------
+    // IF/ID control
+    // --------------------------------------------------------
+
+    // Do not apply younger redirects/flushes while MEM waiting
     assign if_id_flush =
-        redirect_valid              |
-        exception_accept            |
-        ex_exception                |
-        exception_pending_q;
+        !mem_stall &&
+       (redirect_fire               ||
+        exception_accept            ||
+        ex_exception_fire           ||
+        exception_pending_q);
 
-    // Allow IF/ID to be cleared even during a stall
-    assign if_id_en = ~stall | if_id_flush;
+    // Hold IF/ID during either type of stall
+    // Allow normal flush behavior during load use stall
+    assign if_id_en = !mem_stall &&
+                     (!load_use_stall || if_id_flush);
 
-    // Insert bubbles into ID/EX after ECALL advances
-    assign id_ex_flush =
-        redirect_valid              |
-        stall                       |
-        ex_exception                |
-        exception_pending_q;
+
+    // --------------------------------------------------------
+    // ID/EX control
+    // --------------------------------------------------------
+
+    // Hold ID/EX during mem stall
+    assign id_ex_en     = !mem_stall;
+
+    // Add bubbles for load use stalls, redirects, exceptions
+    assign id_ex_flush  =
+        !mem_stall &&
+       (redirect_fire       ||
+        load_use_stall      ||
+        ex_exception_fire   ||
+        exception_pending_q);
+
+
+    // --------------------------------------------------------
+    // EX/MEM control
+    // --------------------------------------------------------
+
+    // Preserve instr in mem until completed
+    assign ex_mem_en = !mem_stall;
 
 
     // --------------------------------------------------------
@@ -172,19 +228,22 @@ module riscv_core
     // --------------------------------------------------------
 
     if_stage #(
-        .RESET_PC           (RESET_PC),
-        .IMEM_DEPTH         (IMEM_DEPTH),
-        .IMEM_INIT_FILE     (IMEM_INIT_FILE)
+        .RESET_PC           (RESET_PC)
     ) u_if_stage (
         .clk                (clk),
         .rst                (rst),
 
-        .pc_en              (pc_en),
+        .decode_ready       (decode_ready),
+        .stop_fetch         (stop_fetch),
         
-        .redirect_valid     (redirect_valid),
+        .redirect_valid     (redirect_fire),
         .redirect_pc        (redirect_pc),
 
-        .if_id_d            (if_id_d)
+        .imem               (imem),
+
+        .if_id_d            (if_id_d),
+
+        .fetch_error        (fetch_error)
     );
 
 
@@ -229,7 +288,13 @@ module riscv_core
     (
         .clk                (clk),
         .rst                (rst),
+
+        .en                 (id_ex_en),
         .flush              (id_ex_flush),
+
+        .wb_reg_write       (wb_reg_write),
+        .wb_rd_addr         (wb_rd_addr),
+        .wb_rd_wdata        (wb_rd_wdata),
 
         .id_ex_d            (id_ex_d),
         .id_ex_q            (id_ex_q)
@@ -269,8 +334,10 @@ module riscv_core
         .clk                (clk),
         .rst                (rst),
 
-        .ex_mem_d            (ex_mem_d),
-        .ex_mem_q            (ex_mem_q)
+        .en                 (ex_mem_en),
+
+        .ex_mem_d           (ex_mem_d),
+        .ex_mem_q           (ex_mem_q)
     );
 
 
@@ -278,14 +345,19 @@ module riscv_core
     // Instantiate MEM
     // --------------------------------------------------------
 
-    mem_stage #(
-        .DMEM_DEPTH         (DMEM_DEPTH)
-    ) u_mem_stage (
+    mem_stage u_mem_stage
+    (
         .clk                (clk),        
+        .rst                (rst),
+
+        .dmem               (dmem),
 
         .ex_mem_q           (ex_mem_q),
 
-        .mem_wb_d           (mem_wb_d)
+        .mem_wb_d           (mem_wb_d),
+
+        .mem_stall          (mem_stall),
+        .access_fault       (data_access_fault)
     );
 
 
