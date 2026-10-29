@@ -53,7 +53,7 @@ module uart_tx #(
 
 
     // --------------------------------------------------------
-    // Transmitter FSM logic
+    // Transmitter state machine
     // --------------------------------------------------------
 
     always_ff @(posedge clk) begin
